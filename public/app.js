@@ -3,6 +3,25 @@
   const $ = function (s, el) { return (el || document).querySelector(s); };
   const $$ = function (s, el) { return Array.from((el || document).querySelectorAll(s)); };
   const main = $('#main');
+  const sidebar = $('.sidebar');
+  if (sidebar) {
+    const navigation = sidebar.querySelector('nav');
+    navigation.id = 'site-navigation';
+    const menuButton = document.createElement('button');
+    menuButton.type = 'button'; menuButton.className = 'mobile-menu-toggle';
+    menuButton.textContent = '菜单'; menuButton.setAttribute('aria-expanded', 'false');
+    menuButton.setAttribute('aria-controls', navigation.id);
+    sidebar.insertBefore(menuButton, navigation);
+    function closeMenu() { sidebar.classList.remove('mobile-menu-open'); menuButton.setAttribute('aria-expanded', 'false'); menuButton.textContent = '菜单'; }
+    menuButton.onclick = function () {
+      const open = sidebar.classList.toggle('mobile-menu-open');
+      menuButton.setAttribute('aria-expanded', String(open)); menuButton.textContent = open ? '收起菜单' : '菜单';
+    };
+    navigation.addEventListener('click', function(event) { if (event.target.closest('a,button')) closeMenu(); });
+    sidebar.addEventListener('keydown', function(event) { if (event.key === 'Escape') { closeMenu(); menuButton.focus(); } });
+    window.addEventListener('hashchange', closeMenu);
+  }
+
   const BASE = document.body.dataset.base || '';
   const ADMIN = document.body.dataset.admin === 'true';
   let adminToken = ''; 
