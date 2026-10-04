@@ -41,3 +41,22 @@ body.client-exam .question-area { width:100%; min-width:0; }
   .shared-passage-label { color:#333; break-after:avoid; }
   .shared-passage .passage { max-height:none; overflow:visible; }
 }
+
+/* Explicit dimensions prevent generic full-width input styles stretching switches. */
+.grading-settings { margin-bottom:24px; padding:24px 28px; }
+.grading-settings-heading h2 { margin:0 0 4px; font-size:20px; }
+.grading-settings-heading p { margin:0 0 8px; color:var(--muted); font-size:13px; }
+.grading-settings .grading-setting-row { display:flex; align-items:center; justify-content:space-between; gap:24px; padding:18px 0; margin:0; cursor:pointer; border-bottom:1px solid var(--line); }
+.grading-setting-copy { display:block; min-width:0; }
+.grading-setting-copy strong { display:block; font-size:14px; font-weight:600; }
+.grading-setting-copy small { display:block; margin-top:4px; color:var(--muted); font-size:12px; line-height:1.7; }
+.grading-settings input.grading-toggle { appearance:none; -webkit-appearance:none; display:block; position:relative; flex:0 0 44px; width:44px; height:26px; min-height:0; margin:0; padding:0; border:1px solid #b9c6c4; border-radius:20px; background:#c7d1cf; cursor:pointer; box-shadow:none; transition:background .15s,border-color .15s; }
+.grading-settings input.grading-toggle::before { content:""; position:absolute; top:3px; left:3px; width:18px; height:18px; border-radius:50%; background:#fff; box-shadow:0 1px 3px #0002; transition:transform .15s; }
+.grading-settings input.grading-toggle:checked { background:var(--teal); border-color:var(--teal); }
+.grading-settings input.grading-toggle:checked::before { transform:translateX(18px); }
+.grading-settings input.grading-toggle:focus-visible { outline:3px solid #75bcaf; outline-offset:4px; }
+.grading-settings input.grading-toggle:disabled { opacity:.5; cursor:wait; }
+.grading-settings-footer { display:flex; align-items:center; justify-content:space-between; gap:24px; padding-top:18px; }
+.grading-settings-footer p { margin:0; font-size:12px; color:var(--muted); line-height:1.8; }
+.grading-settings-footer .btn { flex-shrink:0; }
+@media(max-width:600px) { .grading-settings { padding:20px; } .grading-settings .grading-setting-row { gap:16px; } .grading-settings-footer { flex-direction:column; align-items:stretch; gap:14px; } }
