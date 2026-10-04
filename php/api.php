@@ -3,6 +3,7 @@ declare(strict_types=1);
 require_once __DIR__.'/core.php';
 require_once __DIR__.'/ai.php';
 require_once __DIR__.'/scans.php';
+require_once __DIR__.'/students.php';
 
 function is_admin(): bool {
     $token=$_SERVER['HTTP_AUTHORIZATION'] ?? '';
@@ -10,12 +11,9 @@ function is_admin(): bool {
     return (bool)sql('SELECT token_hash FROM admin_sessions WHERE token_hash=? AND expires>?',[hash('sha256',substr($token,7)),time()])->fetch();
 }
 function owner_hash(): string {
-    $value=$_COOKIE['exam_student'] ?? '';
-    if (!preg_match('/^[a-f0-9]{64}$/D',$value)) {
-        $value=bin2hex(random_bytes(32));
-        setcookie('exam_student',$value,['expires'=>time()+86400*365,'path'=>(config()['EXAM_BASE_PATH'] ?? '').'/','secure'=>!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS']!=='off','httponly'=>true,'samesite'=>'Strict']);
-    }
-    return hash('sha256',$value);
+    $s=student_session();
+    if (!$s) throw new ApiError('请先登录学生账号。',401);
+    return $s['owner_key'];
 }
 function require_owner(array $r,bool $admin,string $owner): void {
     if (!$admin && (!$r['owner_hash'] || !hash_equals($r['owner_hash'],$owner))) throw new ApiError('考试记录不存在。',404);
@@ -55,12 +53,14 @@ function auth_api(string $method,string $path,array $data,bool $admin): array {
     return ['token'=>$token,'expires_in'=>1800];
 }
 function api(string $method,string $path,array $query,array $data): array {
+    if (str_starts_with($path,'/api/student/')) return student_auth($method,$path,$data);
     $admin=is_admin();
     if (str_starts_with($path,'/api/auth/')) return auth_api($method,$path,$data,$admin);
-    $privileged=preg_match('~^/api/(admin/|ai/|jobs/)|^/api/attempts/[\w-]+/(grade|ai-grade|release)$~',$path) || ($query['all'] ?? '')==='1';
+    $privileged=preg_match('~^/api/(admin/|ai/|jobs(?:/|$))|^/api/attempts/[\w-]+/(grade|ai-grade|release)$~',$path) || ($query['all'] ?? '')==='1';
     if ($privileged && !$admin) throw new ApiError('请先登录家长后台。',401);
     if (str_starts_with($path,'/api/admin/scans')) return scans_api($method,$path,$data);
-    $owner=owner_hash();
+    if (str_starts_with($path,'/api/admin/students')) return students_admin($method,$path,$data);
+    $owner=$admin?'':owner_hash();
     if ($path==='/api/ai/status' && $method==='GET') return ai_status();
     if ($path==='/api/jobs' && $method==='GET') {
         $jobs=sql("SELECT * FROM jobs WHERE status IN ('queued','running') ORDER BY created_at DESC LIMIT 20")->fetchAll();
@@ -100,10 +100,12 @@ function api(string $method,string $path,array $query,array $data): array {
         if ($method==='DELETE' && !$publish) { sql("UPDATE papers SET status='archived',updated_at=? WHERE id=?",[stamp(),$id]); return ['id'=>$id,'status'=>'archived']; }
     }
     if ($method==='POST' && $path==='/api/attempts') {
-        return transaction(function() use($data,$owner) {
+        if ($admin) throw new ApiError('请从学生入口登录后开始考试。',403);
+        $student=student_session();
+        return transaction(function() use($data,$owner,$student) {
             [$p,$qs]=get_paper((string)($data['paper_id'] ?? '')); if ($p['status']!=='published') throw new ApiError('请先发布试卷。');
             if ((int)sql("SELECT COUNT(*) FROM attempts WHERE owner_hash=? AND status='active'",[$owner])->fetchColumn()>=5) throw new ApiError('请先完成正在进行的考试。',409);
-            $id=uid(); $name=strval_checked($data['student_name'] ?? '同学','考生称呼',50) ?: '同学';
+            $id=uid(); $name=$student['name'];
             sql('INSERT INTO attempts(id,paper_id,student_name,started_at,deadline,snapshot_json,answers_json,flags_json,grades_json,owner_hash) VALUES(?,?,?,?,?,?,?,?,?,?)',[$id,$p['id'],$name,stamp(),date('Y-m-d\TH:i:s.uP',time()+(int)($p['minutes']*60)),j(['paper'=>$p,'questions'=>$qs]),'{}','[]','{}',$owner]);
             return ['id'=>$id];
         });

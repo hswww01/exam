@@ -10,3 +10,6 @@ CREATE INDEX IF NOT EXISTS idx_attempts_status ON attempts(status);
 CREATE INDEX IF NOT EXISTS idx_failures_created ON login_failures(created);
 CREATE TABLE IF NOT EXISTS paper_scans(id TEXT PRIMARY KEY,paper_title TEXT NOT NULL,student_name TEXT NOT NULL,status TEXT NOT NULL,snapshot_json TEXT NOT NULL,recognized_json TEXT NOT NULL,attempt_id TEXT NOT NULL,created_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS scan_pages(id TEXT PRIMARY KEY,scan_id TEXT NOT NULL REFERENCES paper_scans(id),seq INTEGER NOT NULL,name TEXT NOT NULL,data_url TEXT NOT NULL);
+
+CREATE TABLE IF NOT EXISTS students(id VARCHAR(64) PRIMARY KEY,username VARCHAR(40) NOT NULL UNIQUE,name VARCHAR(200) NOT NULL,class_name VARCHAR(200) NOT NULL,password_hash VARCHAR(255) NOT NULL,owner_key VARCHAR(64) NOT NULL UNIQUE,enabled INTEGER NOT NULL DEFAULT 1,created_at VARCHAR(40) NOT NULL);
+CREATE TABLE IF NOT EXISTS student_sessions(token_hash VARCHAR(64) PRIMARY KEY,student_id VARCHAR(64) NOT NULL,expires BIGINT NOT NULL,FOREIGN KEY(student_id) REFERENCES students(id));

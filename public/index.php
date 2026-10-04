@@ -37,10 +37,10 @@ try {
     if (in_array($path,['/','/index.php','/admin','/admin/'])) {
         $file=str_starts_with($path,'/admin')?'admin.html':'index.html';
         $html=file_get_contents(__DIR__.'/'.$file);
-        $html=str_replace(['<body','href="/app.css"','src="/app.js"','src="/scans.js"','href="/"'],['<body data-base="'.htmlspecialchars($base,ENT_QUOTES).'"','href="'.$base.'/app.css"','src="'.$base.'/app.js"','src="'.$base.'/scans.js"','href="'.$base.'/"'],$html);
+        $html=str_replace(['<body','href="/app.css"','src="/app.js"','src="/scans.js"','src="/accounts.js"','href="/"'],['<body data-base="'.htmlspecialchars($base,ENT_QUOTES).'"','href="'.$base.'/app.css"','src="'.$base.'/app.js"','src="'.$base.'/scans.js"','src="'.$base.'/accounts.js"','href="'.$base.'/"'],$html);
         header('Content-Type: text/html; charset=utf-8'); echo $html; exit;
     }
-    $allowed=in_array($path,['/app.css','/app.js','/scans.js']) || preg_match('~^/figures/[a-zA-Z0-9_-]+\.(svg|png|jpe?g|webp)$~D',$path);
+    $allowed=in_array($path,['/app.css','/app.js','/scans.js','/accounts.js']) || preg_match('~^/figures/[a-zA-Z0-9_-]+\.(svg|png|jpe?g|webp)$~D',$path);
     if (!$allowed || !is_file(__DIR__.$path)) throw new ApiError('页面不存在。',404);
     $mime=['css'=>'text/css','js'=>'application/javascript','svg'=>'image/svg+xml','png'=>'image/png','jpg'=>'image/jpeg','jpeg'=>'image/jpeg','webp'=>'image/webp'];
     header('Content-Type: '.$mime[pathinfo($path,PATHINFO_EXTENSION)]); readfile(__DIR__.$path);

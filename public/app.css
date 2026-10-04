@@ -26,3 +26,6 @@ body.client-exam #main { max-width:1100px; margin:0 auto; padding:16px 24px 40px
 body.client-exam .exam-layout { display:block; }
 body.client-exam .exam-top { top:0; z-index:20; background:var(--bg,#f4f6f8); }
 body.client-exam .question-area { width:100%; min-width:0; }
+
+.account-panel { max-width:480px; margin:48px auto; }
+.account-panel .form-label, #student-edit-form .form-label, #assign-attempt .form-label { display:block; margin:16px 0; }

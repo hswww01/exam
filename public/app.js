@@ -7,7 +7,8 @@
   const ADMIN = document.body.dataset.admin === 'true';
   let adminToken = ''; 
   const state = { overview: null, ai: { configured: false }, route: '', routeSerial: 0, exam: null, examTimer: null, editor: null, review: null, jobs: {}, toastTimer: null };
-  const storagePrefix = 'yixue-exam-';
+  let storagePrefix = 'yixue-exam-';
+  let studentAccount = null;
   let saveTimer = null;
   let reviewFilter = 'all';
   function esc(v) { return String(v == null ? '' : v).replace(/[&<>"']/g, function (s) { return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[s]; }); }
@@ -32,7 +33,7 @@
     catch (_) { throw new Error('无法连接本机服务。请确认考试服务器正在运行。'); }
     let data;
     try { data = await res.json(); } catch (_) { throw new Error('服务响应无法读取，请刷新后重试。'); }
-    if (!res.ok) { if (res.status === 401 && ADMIN && !path.startsWith('/api/auth/')) { adminToken = ''; renderLogin(); } const err = new Error(data.error || '请求未完成，请稍后重试。'); err.status = res.status; throw err; }
+    if (!res.ok) { if (res.status === 401 && !ADMIN && !path.startsWith('/api/student/')) { studentAccount = null; window.ExamAccounts.login(); } if (res.status === 401 && ADMIN && !path.startsWith('/api/auth/')) { adminToken = ''; renderLogin(); } const err = new Error(data.error || '请求未完成，请稍后重试。'); err.status = res.status; throw err; }
     return data;
   }
   function toast(message, error) {
@@ -82,7 +83,17 @@
     loading();
     try {
       if (ADMIN) { const auth = await api('/api/auth/status'); if (!auth.authenticated) { await renderLogin(auth); return; } }
-      if (!ADMIN && ['admin','editor','scans','scan'].includes(page)) { nav('home'); return; }
+      if (!ADMIN) {
+        const auth = await api('/api/student/status');
+        if (studentAccount && (!auth.student || auth.student.id !== studentAccount.id)) {
+          state.overview = null; state.exam = null; state.history = null; state.review = null; clearTimeout(saveTimer);
+        }
+        studentAccount = auth.student;
+        if (!studentAccount) { window.ExamAccounts.login(); return; }
+        storagePrefix = 'yixue-exam-student-' + studentAccount.id + '-';
+        window.ExamAccounts.identity(studentAccount);
+      }
+      if (!ADMIN && ['admin','editor','scans','scan','students'].includes(page)) { nav('home'); return; }
       await overview(page === 'home');
       if (serial !== state.routeSerial) return;
       if (page === 'home') await renderHome(serial);
@@ -92,10 +103,12 @@
       else if (page === 'review') { reviewFilter = pieces[2] === 'wrong' ? 'wrong' : 'all'; await renderReview(pieces[1], serial); }
       else if (page === 'history') await renderHistory(serial);
       else if (page === 'admin') await renderAdmin(serial);
+      else if (page === 'account' && !ADMIN) window.ExamAccounts.password();
+      else if (page === 'students') await window.ExamAccounts.manage();
       else if (page === 'scans' || page === 'scan') await window.ExamScans.render(pieces[1], serial);
       else if (page === 'editor') await renderEditor(pieces[1], serial);
       else nav('home');
-    } catch (err) { if (serial === state.routeSerial) showError(err); }
+    } catch (err) { if (serial === state.routeSerial) { if (!ADMIN && err.status === 401) { window.ExamAccounts.login(); return; } showError(err); } }
     if (!ADMIN && window.chrome && window.chrome.webview) {
       if (serial !== state.routeSerial) return;
       const takingExam = page === 'exam' && state.exam && !state.exam.submitted && active(state.exam.data.attempt);
@@ -154,9 +167,9 @@
   }
   async function startExam(id) {
     const p = (state.overview.papers || []).find(function (x) { return x.id === id; });
-    const name = await modal('准备开始考试', (p ? p.title + '\n' + p.minutes + ' 分钟，满分 ' + p.max_score + ' 分。\n' : '') + '点击开始后持续计时，关闭网页或离开页面也不会暂停。到时将自动交卷。', { name: true, confirm: '开始考试' });
-    if (!name) return; localSet('student', name);
-    const d = await api('/api/attempts', { method: 'POST', body: { paper_id: id, student_name: name } }); nav('exam/' + d.id);
+    const name = await modal('准备开始考试', (p ? p.title + '\n' + p.minutes + ' 分钟，满分 ' + p.max_score + ' 分。\n' : '') + '点击开始后持续计时，关闭网页或离开页面也不会暂停。到时将自动交卷。', { confirm: '开始考试' });
+    if (!name) return;
+    const d = await api('/api/attempts', { method: 'POST', body: { paper_id: id, student_name: studentAccount ? studentAccount.name : '' } }); nav('exam/' + d.id);
   }
   function examDraft(e) { return { answers: e.answers, flags: Array.from(e.flags), updated_at: Date.now() }; }
   function persistExam(e) {
@@ -628,5 +641,8 @@
   Object.keys(localStorage).filter(function(k){return /^yixue-exam-(editor-|grades-|jobs$)/.test(k);}).forEach(function(k){localStorage.removeItem(k);});
   (ADMIN && localGet('jobs') || []).forEach(function (j) { watchJob(j.id, j.localType, j.target); });
   window.ExamUI = { api: api, state: state, main: main, esc: esc, nav: nav, toast: toast, modal: modal };
+  window.ExamAccountUI = { api, esc, main, modal, toast, state, route,
+    setStudent: function(s) { studentAccount=s; state.overview=null; state.exam=null; state.history=null; state.review=null; clearInterval(state.examTimer); clearTimeout(saveTimer); storagePrefix=s?'yixue-exam-student-'+s.id+'-':'yixue-exam-'; },
+    admin: ADMIN };
   route();
 })();
