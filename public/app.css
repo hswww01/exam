@@ -137,3 +137,6 @@ body.client-exam .question-area { width:100%; min-width:0; }
   .grading-setting-copy small,.grading-settings-footer p { font-size:13px; }
   .site-footer { padding:18px 12px max(18px,env(safe-area-inset-bottom)); }
 }
+
+.grading-save-status { flex-shrink:0; font-size:13px; color:var(--teal); }
+.grading-save-status.failed { color:var(--rose); }

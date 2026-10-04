@@ -449,11 +449,29 @@
       '<form id="generator-form" class="generator-form"><label><span class="form-label">结构模板</span><select name="template_id" id="generation-template" required>' + templates.map(function (p) { return '<option value="' + esc(p.id) + '">' + esc(p.title) + (p.status === 'draft' ? '（草稿）' : '') + '</option>'; }).join('') + '</select></label><label><span class="form-label">知识范围</span><textarea name="scope" id="generation-scope" required placeholder="例如：二次函数、圆的基本性质，侧重应用题…">' + esc(templates[0] ? templates[0].scope : '') + '</textarea></label><div class="two-columns"><label><span class="form-label">新卷标题</span><input name="title" placeholder="留空沿用模板标题" maxlength="120"></label><label><span class="form-label">难度</span><select name="difficulty"><option value="标准">标准 · 按中考梯度</option><option value="基础">基础 · 巩固知识</option><option value="提高">提高 · 综合应用</option></select></label></div><button class="btn btn-primary" type="submit"' + (!state.ai.configured || !templates.length ? ' disabled' : '') + '>生成新试卷草稿 →</button>' + (!state.ai.configured ? '<span class="form-help">请在服务器配置文件中填写 API key 后刷新页面。密钥只保存在服务器端。</span>' : '<span class="form-help">新题需检查题意、答案与评分标准，审核后再发布。</span>') + '</form></section>' +
       '<section class="card card-pad"><h2>从草稿，到一份好试卷</h2><div class="method-step"><b>1</b><div><h3>维护结构</h3><p>选择科目和分值结构，手动编辑题目、参考答案与评分标准。</p></div></div><div class="method-step"><b>2</b><div><h3>认真审核</h3><p>检查题意是否明确，知识范围是否合适，计算结果与参考答案是否正确。</p></div></div><div class="method-step"><b>3</b><div><h3>发布与阅卷</h3><p>发布后可开始考试；交卷后支持客观题自动判分、AI 阅卷与人工修订。</p></div></div><div class="notice small" style="margin-top:19px;margin-bottom:0">考试会保存试卷快照。之后修改题库，不会改变已经开始的考试和历史答卷。</div></section></div><div id="admin-job-host"></div>' +
       '<div class="section-heading"><h2>试卷与题库</h2><span>共 ' + papers.length + ' 份试卷</span></div><div class="filter-row"><select id="admin-subject" aria-label="按科目筛选"><option value="">全部科目</option>' + (state.overview.subjects || []).map(function (s) { return '<option value="' + esc(s.code) + '">' + esc(s.name) + '</option>'; }).join('') + '</select><select id="admin-status" aria-label="按发布状态筛选"><option value="">全部状态</option><option value="published">已发布</option><option value="draft">草稿</option></select></div><div class="card table-wrap" id="admin-paper-table"></div>' + sourceNotice();
-    main.insertAdjacentHTML('afterbegin', '<section class="card grading-settings"><header class="grading-settings-heading"><h2>交卷后自动处理</h2><p>设置阅卷与成绩公布方式</p></header><form id="grading-settings-form"><label class="grading-setting-row"><span class="grading-setting-copy"><strong>自动 AI 阅卷</strong><small>学生交卷后，自动评阅尚未评分的主观题。</small></span><input class="grading-toggle" type="checkbox" role="switch" name="auto_grade" aria-label="交卷后自动 AI 阅卷"' + (results[2].auto_grade ? ' checked' : '') + '></label><label class="grading-setting-row"><span class="grading-setting-copy"><strong>自动公布成绩</strong><small>全部题目评分完成后，向学生开放成绩、答案和解析。</small></span><input class="grading-toggle" type="checkbox" role="switch" name="auto_release" aria-label="全部评分完成后自动公布成绩"' + (results[2].auto_release ? ' checked' : '') + '></label><div class="grading-settings-footer"><p>设置对之后交卷的试卷生效，已排队任务保留原设置。<br>AI 阅卷失败时不会公布不完整成绩，教师可复核或撤回成绩。</p><button class="btn btn-primary" type="submit">保存设置</button></div></form></section>');
-    $('#grading-settings-form').onsubmit = async function(event) {
-      event.preventDefault(); event.stopPropagation(); const form=event.target; const button=form.querySelector('button'); button.disabled=true;
-      try { await api('/api/admin/grading-settings',{method:'PUT',body:{auto_grade:form.elements.auto_grade.checked,auto_release:form.elements.auto_release.checked}}); toast('自动阅卷设置已保存。'); }
-      catch(err) { toast(err.message,true); } finally { button.disabled=false; }
+    main.insertAdjacentHTML('afterbegin', '<section class="card grading-settings"><header class="grading-settings-heading"><h2>交卷后自动处理</h2><p>设置阅卷与成绩公布方式</p></header><form id="grading-settings-form"><label class="grading-setting-row"><span class="grading-setting-copy"><strong>自动 AI 阅卷</strong><small>学生交卷后，自动评阅尚未评分的主观题。</small></span><input class="grading-toggle" type="checkbox" role="switch" name="auto_grade" aria-label="交卷后自动 AI 阅卷"' + (results[2].auto_grade ? ' checked' : '') + '></label><label class="grading-setting-row"><span class="grading-setting-copy"><strong>自动公布成绩</strong><small>全部题目评分完成后，向学生开放成绩、答案和解析。</small></span><input class="grading-toggle" type="checkbox" role="switch" name="auto_release" aria-label="全部评分完成后自动公布成绩"' + (results[2].auto_release ? ' checked' : '') + '></label><div class="grading-settings-footer"><p>设置对之后交卷的试卷生效，已排队任务保留原设置。<br>AI 阅卷失败时不会公布不完整成绩，教师可复核或撤回成绩。</p><span class="grading-save-status" role="status" aria-live="polite">修改后自动保存</span></div></form></section>');
+    const settingsForm = $('#grading-settings-form');
+    let savedSettings = { auto_grade: !!results[2].auto_grade, auto_release: !!results[2].auto_release };
+    let savingSettings = false;
+    settingsForm.onsubmit = function(event) { event.preventDefault(); event.stopPropagation(); };
+    settingsForm.onchange = async function(event) {
+      if (!event.target.matches('.grading-toggle') || savingSettings) return;
+      const inputs = Array.from(settingsForm.querySelectorAll('.grading-toggle'));
+      const status = settingsForm.querySelector('.grading-save-status');
+      const next = { auto_grade: settingsForm.elements.auto_grade.checked, auto_release: settingsForm.elements.auto_release.checked };
+      savingSettings = true; inputs.forEach(input => { input.disabled = true; });
+      settingsForm.setAttribute('aria-busy', 'true'); status.textContent = '正在保存…'; status.classList.remove('failed');
+      try {
+        const result = await api('/api/admin/grading-settings', { method: 'PUT', body: next });
+        savedSettings = { auto_grade: !!result.auto_grade, auto_release: !!result.auto_release };
+        status.textContent = '已自动保存';
+      } catch(err) {
+        status.textContent = '保存失败，请重试'; status.classList.add('failed'); toast(err.message, true);
+      } finally {
+        settingsForm.elements.auto_grade.checked = savedSettings.auto_grade;
+        settingsForm.elements.auto_release.checked = savedSettings.auto_release;
+        savingSettings = false; inputs.forEach(input => { input.disabled = false; }); settingsForm.removeAttribute('aria-busy');
+      }
     };
     renderAdminTable(); renderJobHosts();
   }
