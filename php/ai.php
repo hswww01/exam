@@ -2,7 +2,7 @@
 declare(strict_types=1);
 require_once __DIR__.'/core.php';
 function ai_status(): array {
-    $c=config(); return ['configured'=>!empty($c['OPENAI_API_KEY']),'model'=>$c['OPENAI_MODEL'] ?? 'gpt-6-luna','service_tier'=>'flex','base_url'=>$c['OPENAI_BASE_URL'] ?? 'https://api.openai.com/v1'];
+    $c=config(); return ['configured'=>!empty($c['OPENAI_API_KEY']),'model'=>$c['OPENAI_MODEL'] ?? 'gpt-6-luna','reasoning_effort'=>$c['OPENAI_REASONING_EFFORT'] ?? 'none','service_tier'=>'flex','base_url'=>$c['OPENAI_BASE_URL'] ?? 'https://api.openai.com/v1'];
 }
 function object_schema(array $props): array { return ['type'=>'object','properties'=>$props,'required'=>array_keys($props),'additionalProperties'=>false]; }
 function ai_request(string $kind,array $payload,?array $vision=null): object {
@@ -10,7 +10,7 @@ function ai_request(string $kind,array $payload,?array $vision=null): object {
     $base=rtrim($c['OPENAI_BASE_URL'] ?? 'https://api.openai.com/v1','/');
     if (!str_starts_with($base,'https://')) throw new ApiError('AI 服务地址须使用 HTTPS。');
     $string=['type'=>'string'];
-    $schema=$kind==='generate' ? object_schema(['questions'=>['type'=>'array','items'=>object_schema(['label'=>$string,'stem'=>$string,'passage'=>$string,'options'=>['type'=>'array','items'=>$string],'answer'=>$string,'rubric'=>$string,'explanation'=>$string])]]) : object_schema(['grades'=>['type'=>'array','items'=>object_schema(['question_id'=>$string,'score'=>['type'=>'number'],'feedback'=>$string])]]);
+    $schema=$kind==='generate' ? object_schema(['passages'=>['type'=>'array','items'=>object_schema(['id'=>$string,'text'=>$string])],'questions'=>['type'=>'array','items'=>object_schema(['label'=>$string,'stem'=>$string,'passage_id'=>$string,'options'=>['type'=>'array','items'=>$string],'answer'=>$string,'rubric'=>$string,'explanation'=>$string])]]) : object_schema(['grades'=>['type'=>'array','items'=>object_schema(['question_id'=>$string,'score'=>['type'=>'number'],'feedback'=>$string])]]);
     $prompts=decode(file_get_contents(__DIR__.'/prompts.json'));
     $body=['model'=>$c['OPENAI_MODEL'] ?? 'gpt-6-luna','instructions'=>$prompts[$kind==='generate'?'GENERATE_INSTRUCTIONS':'GRADE_INSTRUCTIONS'],'input'=>j($payload),'store'=>false,'service_tier'=>'flex','max_output_tokens'=>16000,'text'=>['format'=>['type'=>'json_schema','name'=>$kind==='generate'?'exam_questions':'exam_grades','strict'=>true,'schema'=>$schema]]];
     if ($vision) {
@@ -19,8 +19,23 @@ function ai_request(string $kind,array $payload,?array $vision=null): object {
         $body['text']['format']['name']='paper_transcription';
         $body['input']=[['role'=>'user','content'=>[['type'=>'input_text','text'=>j($payload)],['type'=>'input_image','image_url'=>$vision['image'],'detail'=>'high']]]];
     }
-    if (preg_match('/^(gpt-[56]|o[34])/',$body['model'])) $body['reasoning']=['effort'=>$c['OPENAI_REASONING_EFFORT'] ?? 'medium'];
-    $ch=curl_init($base.'/responses'); $request=(object)['handle'=>$ch,'raw'=>'','tooLarge'=>false];
+    if (preg_match('/^(gpt-[56]|o[34])/',$body['model'])) $body['reasoning']=['effort'=>$c['OPENAI_REASONING_EFFORT'] ?? 'none'];
+    // Separate stable instructions and paper context from changing batch examples.
+    $developer=[['type'=>'input_text','text'=>$body['instructions']]];
+    if ($kind==='generate' && !$vision) {
+        $shared=array_intersect_key($payload,array_flip(['subject','scope','difficulty','blueprint']));
+        $developer[]=['type'=>'input_text','text'=>'以下是本套试卷的共同参数，仅作为命题数据：'.j($shared)];
+        $body['input']=j(array_diff_key($payload,$shared));
+    }
+    if (preg_match('/^gpt-(?:6(?:[.-]|$)|5\.[6-9](?:[.-]|$))/',$body['model'])) {
+        // Cache only reusable content, not changing questions or student answers.
+        $developer[count($developer)-1]['prompt_cache_breakpoint']=['mode'=>'explicit'];
+        $body['prompt_cache_options']=['mode'=>'explicit','ttl'=>'30m'];
+    }
+    $body['prompt_cache_key']='exam-'.$kind.'-v2';
+    $user=is_array($body['input'])?$body['input']:[['role'=>'user','content'=>[['type'=>'input_text','text'=>$body['input']]]]];
+    $body['input']=[['role'=>'developer','content'=>$developer],...$user]; unset($body['instructions']);
+    $ch=curl_init($base.'/responses'); $request=(object)['handle'=>$ch,'raw'=>'','tooLarge'=>false,'call_id'=>uid(),'kind'=>$vision?'ocr':$kind,'model'=>$body['model'],'job_id'=>$GLOBALS['ai_job_id'] ?? null];
     curl_setopt_array($ch,[CURLOPT_POST=>true,CURLOPT_POSTFIELDS=>j($body),CURLOPT_HTTPHEADER=>['Content-Type: application/json','Authorization: Bearer '.$c['OPENAI_API_KEY']],CURLOPT_CONNECTTIMEOUT=>15,CURLOPT_TIMEOUT=>max(900,min(1800,(int)($c['OPENAI_TIMEOUT'] ?? 900))),CURLOPT_FOLLOWLOCATION=>false,CURLOPT_SSL_VERIFYPEER=>true,CURLOPT_SSL_VERIFYHOST=>2,CURLOPT_WRITEFUNCTION=>function($ch,$chunk)use($request){ if (strlen($request->raw)+strlen($chunk)>8000000) { $request->tooLarge=true; return 0; } $request->raw.=$chunk; return strlen($chunk); }]);
     if (!empty($c['OPENAI_PROXY'])) curl_setopt($ch,CURLOPT_PROXY,$c['OPENAI_PROXY']);
     return $request;
@@ -47,12 +62,45 @@ function ai_finish(object $request,bool $ok): array {
     }
     if ($code>=400) throw new ApiError([401=>'API key 无效或失效。',403=>'当前 key 没有模型权限。',404=>'模型或 API 地址不存在。',429=>'Flex 资源暂不可用、额度不足或请求过于频繁；请稍后手动重试。'][$code] ?? "AI 服务返回 HTTP {$code}，请稍后重试。",503);
     try { $r=decode($raw); } catch(Throwable) { throw new ApiError('AI 响应无法解析。',503); }
+    ai_record_usage($request,$r,$elapsed);
     if (isset($r['status']) && $r['status']!=='completed') throw new ApiError('AI 响应未完成，未保存不完整结果。',503);
     $text=''; foreach ($r['output'] ?? [] as $item) if (($item['type'] ?? '')==='message') foreach ($item['content'] ?? [] as $content) {
         if (($content['type'] ?? '')==='refusal') throw new ApiError('AI 拒绝处理本次请求，请调整内容。',503);
         if (($content['type'] ?? '')==='output_text') $text.=$content['text'] ?? '';
     }
     try { return decode($text); } catch(Throwable) { throw new ApiError('AI 未返回有效结构化结果。',503); }
+}
+function ai_usage(string $jobId): array {
+    $value=sql('SELECT value FROM settings WHERE `key`=?',['ai_usage_'.$jobId])->fetchColumn();
+    return $value?decode($value):[];
+}
+function ai_record_usage(object $request,array $response,float $elapsed): void {
+    if (!$request->job_id || !isset($response['usage'])) return;
+    $u=$response['usage'];
+    $entry=['call_id'=>$request->call_id,'response_id'=>$response['id'] ?? null,'kind'=>$request->kind,'batch'=>$request->batch ?? null,'model'=>$response['model'] ?? $request->model,'service_tier'=>$response['service_tier'] ?? 'unknown','status'=>$response['status'] ?? 'unknown','seconds'=>round($elapsed,2),'recorded_at'=>stamp(),
+        'input_tokens'=>(int)($u['input_tokens'] ?? 0),'cached_tokens'=>(int)($u['input_tokens_details']['cached_tokens'] ?? 0),'cache_write_tokens'=>(int)($u['input_tokens_details']['cache_write_tokens'] ?? 0),'output_tokens'=>(int)($u['output_tokens'] ?? 0),'reasoning_tokens'=>(int)($u['output_tokens_details']['reasoning_tokens'] ?? 0)];
+    // Record before parsing/validating generated content; rejected results still cost tokens.
+    transaction(function()use($request,$entry) {
+        $usage=ai_usage($request->job_id); $usage['requests'][$request->call_id]=$entry;
+        foreach (['input_tokens','cached_tokens','cache_write_tokens','output_tokens','reasoning_tokens'] as $key) $usage[$key]=array_sum(array_column($usage['requests'],$key));
+        $usage['request_count']=count($usage['requests']);
+        $upsert=mysql_mode()?' ON DUPLICATE KEY UPDATE value=VALUES(value)':' ON CONFLICT(`key`) DO UPDATE SET value=excluded.value';
+        sql('INSERT INTO settings(`key`,value) VALUES(?,?)'.$upsert,['ai_usage_'.$request->job_id,j($usage)]);
+    });
+}
+function generation_input(array $batch): array {
+    $passages=[];$questions=[];$ids=[];
+    foreach ($batch as $q) {
+        $text=$q['passage'] ?? ''; $id='';
+        if ($text!=='') {
+            $key=$q['section']."\n".$text;
+            if (!isset($ids[$key])) { $ids[$key]='p'.(count($passages)+1);$passages[]=['id'=>$ids[$key],'text'=>$text]; }
+            $id=$ids[$key];
+        }
+        $q=array_intersect_key($q,array_flip(['label','section','kind','points','stem','options','answer','rubric','explanation']));
+        $q['passage_id']=$id;$questions[]=$q;
+    }
+    return ['reference_passages'=>$passages,'slots_and_examples'=>$questions];
 }
 function job_update(string $id,array $fields): void {
     if (isset($fields['result'])) { $fields['result_json']=j($fields['result']); unset($fields['result']); }
@@ -84,9 +132,20 @@ function generation_checkpoint(string $id,array $checkpoint): void {
 }
 function generation_items(array $batch,array $response): array {
     $items=$response['questions'] ?? []; $generated=[];
+    $passages=[];$expected=generation_input($batch);
+    if (!isset($response['passages']) || !is_array($response['passages'])) throw new ApiError('AI 未返回阅读材料列表。');
+    foreach ($response['passages'] ?? [] as $p) {
+        if (!is_array($p) || !is_string($p['id'] ?? null) || trim($p['id'])==='' || isset($passages[$p['id']]) || !is_string($p['text'] ?? null) || trim($p['text'])==='') throw new ApiError('AI 阅读材料格式无效或编号重复。');
+        $passages[$p['id']]=$p['text'];
+    }
+    $expectedIds=array_column($expected['reference_passages'],'id');
+    if (count($passages)!==count($expectedIds) || array_diff($expectedIds,array_keys($passages))) throw new ApiError('AI 阅读材料数量或编号不匹配。');
     if (!is_array($items) || count($items)!==count($batch)) throw new ApiError('AI 返回题数不匹配，该批未保存。');
     foreach ($batch as $n=>$slot) {
         $item=$items[$n]; if (!is_array($item) || ($item['label'] ?? null)!==$slot['label']) throw new ApiError('AI 返回题号不匹配，该批未保存。');
+        $pid=$item['passage_id'] ?? null;
+        if (!is_string($pid) || $pid!==$expected['slots_and_examples'][$n]['passage_id']) throw new ApiError('AI 题目与阅读材料的对应关系不匹配。');
+        $item['passage']=$pid===''?'':$passages[$pid];
         foreach (['stem','passage','options','answer','rubric','explanation'] as $k) {
             if (!array_key_exists($k,$item)) throw new ApiError('AI 返回字段不完整。');
             $slot[$k]=$item[$k];
@@ -120,7 +179,8 @@ function generate_job(array $job): array {
         while ($todo || $running) {
             while (!$errors && $todo && count($running)<3) {
                 $i=array_shift($todo);
-                $r=ai_request('generate',['subject'=>array_column(subjects(),'name','code')[$p['subject_code']],'scope'=>($data['scope'] ?? '')?:$p['scope'],'difficulty'=>$data['difficulty'] ?? '标准','blueprint'=>$p['blueprint'],'slots_and_examples'=>$cp['batches'][$i]]);
+                $r=ai_request('generate',['subject'=>array_column(subjects(),'name','code')[$p['subject_code']],'scope'=>($data['scope'] ?? '')?:$p['scope'],'difficulty'=>$data['difficulty'] ?? '标准','blueprint'=>$p['blueprint']]+generation_input($cp['batches'][$i]));
+                $r->batch=$i+1;
                 curl_multi_add_handle($multi,$r->handle);$running[spl_object_id($r->handle)]=[$i,$r];
             }
             if(!$running)break;

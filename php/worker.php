@@ -16,6 +16,7 @@ do {
     });
     if (!$job) { if ($once) break; sleep(2); continue; }
     try {
+        $GLOBALS['ai_job_id']=$job['id'];
         $result=match($job['type']) { 'generate'=>generate_job($job), 'ocr'=>recognize_scan($job), default=>grade_job($job) };
         job_update($job['id'],['status'=>'completed','progress'=>100,'message'=>'已完成。','result'=>$result]);
     } catch (Throwable $e) {

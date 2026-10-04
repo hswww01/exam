@@ -182,7 +182,7 @@
   async function renderLogin(auth) {
     const a = auth || await api('/api/auth/status');
     main.innerHTML = '<section class="card card-pad" style="max-width:480px;margin:60px auto"><div class="eyebrow">教师专用</div><h1>' + (a.configured ? '登录教师后台' : '设置教师密码') + '</h1><p>题库、参考答案、阅卷和成绩公布仅供教师管理。登录有效期30分钟。</p><form id="admin-login"><label class="form-label">教师密码<input name="password" type="password" required minlength="10" maxlength="128" autocomplete="' + (a.configured ? 'current-password' : 'new-password') + '"></label>' + (!a.configured ? '<label class="form-label">一次性设置码<input name="setup_code" required autocomplete="off" placeholder="填写安装时生成的设置码"></label><label class="form-label">再次输入密码<input name="confirm" type="password" required minlength="10" autocomplete="new-password"></label><p>请由教师完成首次设置，至少10个字符。</p>' : '') + '<button class="btn btn-primary" type="submit">' + (a.configured ? '登录' : '设置并登录') + '</button></form></section>';
-    $('#admin-login').onsubmit = async function(event) { event.preventDefault(); event.stopPropagation(); const f = new FormData(event.target); if (!a.configured && f.get('password') !== f.get('confirm')) { toast('两次密码不一致。',true); return; } try { const d = await api('/api/auth/' + (a.configured ? 'login' : 'setup'), {method:'POST',body:{password:f.get('password'),setup_code:f.get('setup_code')}}); adminToken = d.token; state.overview = null; const tasks = await api('/api/jobs'); (tasks.jobs || []).forEach(function(j){watchJob(j.id,j.type,j.target_id);}); await route(); } catch(err) { toast(err.message,true); } };
+    $('#admin-login').onsubmit = async function(event) { event.preventDefault(); event.stopPropagation(); const f = new FormData(event.target); if (!a.configured && f.get('password') !== f.get('confirm')) { toast('两次密码不一致。',true); return; } try { const d = await api('/api/auth/' + (a.configured ? 'login' : 'setup'), {method:'POST',body:{password:f.get('password'),setup_code:f.get('setup_code')}}); adminToken = d.token; state.overview = null; const tasks = await api('/api/jobs'); (tasks.jobs || []).forEach(function(j){watchJob(j.id,j.type,j.target_id,true);}); await route(); } catch(err) { toast(err.message,true); } };
   }
   async function renderHome(serial) {
     const d = await overview();
@@ -444,19 +444,27 @@
     const d = await api('/api/attempts/' + encodeURIComponent(id) + '/ai-grade', { method: 'POST', body: {} }); watchJob(d.job_id, 'grade', id); toast('AI 正在阅卷，完成后会显示评分与评语。');
   }
   function persistJobs() { localSet('jobs', Object.values(state.jobs).filter(function (j) { return j.status === 'queued' || j.status === 'running'; }).map(function (j) { return { id: j.id, localType: j.localType, target: j.target }; })); }
+  function jobUsageHtml(usage) {
+    if (!usage || !usage.request_count) return '';
+    const n = function(v) { return (Number(v) || 0).toLocaleString(); };
+    const rows = Object.values(usage.requests || {}).map(function(r) {
+      return '<li>' + esc(r.batch ? '第 ' + r.batch + ' 批' : '请求') + ' · 输入 ' + n(r.input_tokens) + '（缓存读取 ' + n(r.cached_tokens) + '、写入 ' + n(r.cache_write_tokens) + '） · 输出 ' + n(r.output_tokens) + '（含推理 ' + n(r.reasoning_tokens) + '） · ' + n(r.seconds) + ' 秒</li>';
+    }).join('');
+    return '<details class="job-usage"><summary>用量：输入 ' + n(usage.input_tokens) + ' · 缓存命中 ' + n(usage.cached_tokens) + ' · 输出 ' + n(usage.output_tokens) + ' token</summary><p class="muted">累计 ' + n(usage.request_count) + ' 次已返回用量的请求（含重试）。缓存读取和写入属于输入，推理属于输出，无须重复相加。未返回用量的超时请求不计入此处。</p><ul>' + rows + '</ul></details>';
+  }
   function jobHtml(j) {
     const failed = j.status === 'failed'; const done = j.status === 'completed'; let action = '';
     if (failed && j.localType === 'generate') action='<button type="button" class="btn btn-primary btn-small" data-action="retry-generation" data-id="'+esc(j.id)+'">继续未完成批次</button>';
     if (done && j.result && j.result.scan_id) action = '<a class="btn btn-primary btn-small" href="#scan/' + esc(j.result.scan_id) + '">核对照片识别结果 →</a>';
     if (done && j.result && j.result.paper_id) action = '<a class="btn btn-primary btn-small" href="#editor/' + esc(j.result.paper_id) + '">查看并审核新试卷 →</a>';
     if (done && j.result && j.result.attempt_id) action = '<a class="btn btn-primary btn-small" href="#review/' + esc(j.result.attempt_id) + '">查看阅卷结果 →</a>';
-    return '<section class="job-card"><div class="card-title-row"><h3>' + (j.localType === 'ocr' ? '答卷照片识别' : j.localType === 'grade' ? 'AI 阅卷' : 'AI 出题') + '</h3><span class="pill ' + (failed ? 'pill-rose' : done ? 'pill-green' : 'pill-amber') + '">' + (failed ? '未完成' : done ? '已完成' : '进行中') + '</span></div><p>' + esc(failed ? j.error || j.message || '任务失败，请检查 AI 配置后重试。' : j.message || '任务已加入队列…') + '</p>' + (!failed && !done ? '<div class="progress-bar"><span style="width:' + Math.min(100, Math.max(0, Number(j.progress) || 0)) + '%"></span></div>' : '') + action + '</section>';
+    return '<section class="job-card"><div class="card-title-row"><h3>' + (j.localType === 'ocr' ? '答卷照片识别' : j.localType === 'grade' ? 'AI 阅卷' : 'AI 出题') + '</h3><span class="pill ' + (failed ? 'pill-rose' : done ? 'pill-green' : 'pill-amber') + '">' + (failed ? '未完成' : done ? '已完成' : '进行中') + '</span></div><p>' + esc(failed ? j.error || j.message || '任务失败，请检查 AI 配置后重试。' : j.message || '任务已加入队列…') + '</p>' + (!failed && !done ? '<div class="progress-bar"><span style="width:' + Math.min(100, Math.max(0, Number(j.progress) || 0)) + '%"></span></div>' : '') + jobUsageHtml(j.usage) + action + '</section>';
   }
   function renderJobHosts() {
-    const adminHost = $('#admin-job-host'); if (adminHost) adminHost.innerHTML = Object.values(state.jobs).filter(function (j) { return j.localType !== 'grade'; }).slice(-3).map(jobHtml).join('');
+    const adminHost = $('#admin-job-host'); if (adminHost) adminHost.innerHTML = Object.values(state.jobs).filter(function (j) { return j.localType !== 'grade'; }).sort(function(a,b){return String(b.created_at || '').localeCompare(String(a.created_at || ''));}).slice(0,3).map(jobHtml).join('');
     const reviewHost = $('#review-job-host'); if (reviewHost && state.review) reviewHost.innerHTML = Object.values(state.jobs).filter(function (j) { return j.localType === 'grade' && j.target === state.review.attempt.id; }).slice(-2).map(jobHtml).join('');
   }
-  function watchJob(id, type, target) {
+  function watchJob(id, type, target, restoring) {
     if (!id) return; if (state.jobs[id] && state.jobs[id].polling) return;
     state.jobs[id] = Object.assign(state.jobs[id] || {}, { id: id, localType: type, target: target, status: 'queued', polling: true, progress: 0 }); persistJobs(); renderJobHosts();
     async function poll() {
@@ -466,7 +474,7 @@
         Object.assign(j, incoming); renderJobHosts(); persistJobs();
         if (j.status === 'completed' || j.status === 'failed') {
           j.polling = false; persistJobs(); state.overview = null;
-          if (j.status === 'completed') {
+          if (j.status === 'completed' && !restoring) {
             toast(type === 'ocr' ? '照片识别完成，请核对答案。' : type === 'grade' ? 'AI 阅卷完成，请查看并复核评分。' : '新试卷已生成草稿，请审核后发布。');
             if (type === 'grade' && state.route.startsWith('review/' + target)) await renderReview(target, state.routeSerial);
             else if (type !== 'grade' && state.route === 'admin') await renderAdmin(state.routeSerial);
@@ -483,7 +491,7 @@
     poll();
   }
   function aiStatusHtml() {
-    return '<div class="ai-status' + (state.ai.configured ? '' : ' off') + '"><span class="status-dot"></span>' + (state.ai.configured ? 'AI 已配置 · ' + esc(state.ai.model || '已配置模型') + ' · Flex' : '等待填写 key · ' + esc(state.ai.model || 'gpt-6-luna')) + '</div>';
+    return '<div class="ai-status' + (state.ai.configured ? '' : ' off') + '"><span class="status-dot"></span>' + (state.ai.configured ? 'AI 已配置 · ' + esc(state.ai.model || '已配置模型') + ' · Flex · 推理：' + esc(state.ai.reasoning_effort || 'none') : '等待填写 key · ' + esc(state.ai.model || 'gpt-6-luna')) + '</div>';
   }
   async function renderAdmin(serial) {
     await overview();

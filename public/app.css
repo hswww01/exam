@@ -169,3 +169,5 @@ body.client-exam .question-area { width:100%; min-width:0; }
   .list-controls { min-width:0; }
   .list-controls input { max-width:100%; }
 }
+
+.job-usage{margin:12px 0;overflow-wrap:anywhere;font-size:13px;line-height:1.7}.job-usage summary{cursor:pointer;color:var(--muted,#64748b)}.job-usage ul{padding-left:20px}.job-usage li{margin:6px 0}

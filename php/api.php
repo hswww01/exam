@@ -75,8 +75,8 @@ function api(string $method,string $path,array $query,array $data): array {
     if ($method==='GET' && preg_match('~^/api/lists/([a-z]+)$~D',$path,$m)) return list_api($m[1],$query,$admin,$owner);
     if ($path==='/api/ai/status' && $method==='GET') return ai_status();
     if ($path==='/api/jobs' && $method==='GET') {
-        $jobs=sql("SELECT * FROM jobs WHERE status IN ('queued','running') OR (type='generate' AND status='failed') ORDER BY created_at DESC,id DESC LIMIT 20")->fetchAll();
-        foreach ($jobs as &$job) { unset($job['payload_json']); $job['result']=decode($job['result_json']); unset($job['result_json']); }
+        $jobs=sql("SELECT * FROM jobs WHERE status IN ('queued','running') OR (type='generate' AND status IN ('failed','completed')) ORDER BY created_at DESC,id DESC LIMIT 20")->fetchAll();
+        foreach ($jobs as &$job) { unset($job['payload_json']); $job['result']=decode($job['result_json']); $job['usage']=ai_usage($job['id']); unset($job['result_json']); }
         return ['jobs'=>$jobs];
     }
     if ($method==='POST' && preg_match('~^/api/jobs/([a-f0-9]+)/retry$~D',$path,$match)) {
@@ -93,7 +93,7 @@ function api(string $method,string $path,array $query,array $data): array {
     }
     if ($method==='GET' && preg_match('~^/api/jobs/([\w-]+)$~',$path,$m)) {
         $job=sql('SELECT * FROM jobs WHERE id=?',[$m[1]])->fetch(); if (!$job) throw new ApiError('任务不存在。',404);
-        $job['result']=decode($job['result_json']); unset($job['result_json'],$job['payload_json']); return ['job'=>$job];
+        $job['result']=decode($job['result_json']); $job['usage']=ai_usage($job['id']); unset($job['result_json'],$job['payload_json']); return ['job'=>$job];
     }
     if ($method==='GET' && in_array($path,['/api/overview','/api/subjects','/api/papers','/api/attempts'])) {
         transaction(fn()=>expire_attempts());
