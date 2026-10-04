@@ -104,6 +104,8 @@ function grade_job(array $job): array {
             $grades[$qid]=$mark; sql('INSERT INTO grade_history(attempt_id,question_id,grade_json,created_at) VALUES(?,?,?,?)',[$row['id'],$qid,j($mark),stamp()]);
         }
         sql('UPDATE attempts SET grades_json=? WHERE id=?',[j((object)$grades),$row['id']]);
+        $options=decode($job['payload_json']);
+        if ($options['auto_release'] ?? grading_settings()['auto_release']) release_if_complete($row['id']);
     });
     return ['attempt_id'=>$r['id']];
 }

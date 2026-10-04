@@ -58,6 +58,16 @@ function api(string $method,string $path,array $query,array $data): array {
     if (str_starts_with($path,'/api/auth/')) return auth_api($method,$path,$data,$admin);
     $privileged=preg_match('~^/api/(admin/|ai/|jobs(?:/|$))|^/api/attempts/[\w-]+/(grade|ai-grade|release)$~',$path) || ($query['all'] ?? '')==='1';
     if ($privileged && !$admin) throw new ApiError('请先登录教师后台。',401);
+    if ($path==='/api/admin/grading-settings') {
+        if ($method==='GET') return grading_settings();
+        if ($method==='PUT') {
+            foreach (['auto_grade','auto_release'] as $key) if (!isset($data[$key]) || !is_bool($data[$key])) throw new ApiError('设置值无效。');
+            $value=j(['auto_grade'=>$data['auto_grade'],'auto_release'=>$data['auto_release']]);
+            $upsert=mysql_mode()?' ON DUPLICATE KEY UPDATE value=VALUES(value)':' ON CONFLICT(`key`) DO UPDATE SET value=excluded.value';
+            sql("INSERT INTO settings(`key`,value) VALUES('auto_grading',?)".$upsert,[$value]);return grading_settings();
+        }
+        throw new ApiError('方法不允许。',405);
+    }
     if (str_starts_with($path,'/api/admin/scans')) return scans_api($method,$path,$data);
     if (str_starts_with($path,'/api/admin/students')) return students_admin($method,$path,$data);
     $owner=$admin?'':owner_hash();
@@ -117,6 +127,8 @@ function api(string $method,string $path,array $query,array $data): array {
             $r=get_attempt($id); require_owner($r,$admin,$owner);
             if ($method==='GET' && !$action) {
                 $out=attempt_result($r,$admin);
+                $job=sql("SELECT status FROM jobs WHERE type='grade' AND target_id=? ORDER BY created_at DESC,id DESC LIMIT 1",[$id])->fetch();
+                $out['grading_status']=$r['released']?'released':($job['status'] ?? 'manual');
                 if ($admin) $out['scan_id']=sql('SELECT id FROM paper_scans WHERE attempt_id=?',[$id])->fetchColumn() ?: null;
                 return $out;
             }

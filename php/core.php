@@ -168,6 +168,21 @@ function update_answers(array $r,array $data): void {
     foreach ($flags as $id) if (!is_string($id) || !in_array($id,$valid,true)) throw new ApiError('标记题号无效。');
     sql('UPDATE attempts SET answers_json=?,flags_json=? WHERE id=?',[j((object)$answers),j(array_values(array_unique($flags))),$r['id']]);
 }
+function grading_settings(): array {
+    $row=sql("SELECT value FROM settings WHERE `key`='auto_grading'")->fetchColumn();
+    return $row ? decode($row) : ['auto_grade'=>true,'auto_release'=>true];
+}
+function release_if_complete(string $id): void {
+    $r=get_attempt($id); if ($r['status']==='active') return;
+    $grades=decode($r['grades_json']); $snap=decode($r['snapshot_json']); $total=0;
+    foreach ($snap['questions'] as $q) {
+        $score=$grades[$q['id']]['score'] ?? null;
+        if (!is_numeric($score) || !is_finite((float)$score) || $score<0 || $score>$q['points']) return;
+        $total+=(float)$score;
+    }
+    if ($total>$snap['paper']['max_score']+0.000001) return;
+    sql('UPDATE attempts SET released=1 WHERE id=?',[$id]);
+}
 function submit_attempt(array $r): void {
     if ($r['status']!=='active') return; $answers=decode($r['answers_json']); $grades=[];
     foreach (decode($r['snapshot_json'])['questions'] as $q) {
@@ -175,6 +190,15 @@ function submit_attempt(array $r): void {
         if (!$q['manual'] || blank($a)) $grades[$q['id']]=['score'=>blank($a)?0:objective_score($q,$a),'feedback'=>blank($a)?'未作答。':'按参考答案自动评分。','grader'=>'auto'];
     }
     sql("UPDATE attempts SET status='submitted',submitted_at=?,grades_json=? WHERE id=?",[stamp(),j((object)$grades),$r['id']]);
+    $settings=grading_settings();
+    $pending=count($grades)<count(decode($r['snapshot_json'])['questions']);
+    if (!$pending && $settings['auto_release']) release_if_complete($r['id']);
+    if ($pending && $settings['auto_grade']) {
+        // Called under the attempt transaction: submission and queue insertion commit together.
+        $configured=!empty(config()['OPENAI_API_KEY']);
+        sql('INSERT INTO jobs(id,type,target_id,status,progress,message,result_json,error,created_at,updated_at,payload_json) VALUES(?,?,?,?,?,?,?,?,?,?,?)',
+            [uid(),'grade',$r['id'],$configured?'queued':'failed',0,$configured?'交卷后自动阅卷，等待处理。':'自动阅卷未启动。','{}',$configured?'':'尚未配置 AI API key，请教师配置后重试。',stamp(),stamp(),j(['automatic'=>true,'auto_release'=>$settings['auto_release']])]);
+    }
 }
 function expire_attempts(): void {
     foreach (sql("SELECT * FROM attempts WHERE status='active' AND deadline<=?".(mysql_mode() && db()->inTransaction()?' FOR UPDATE':''),[stamp()])->fetchAll() as $r) submit_attempt($r);

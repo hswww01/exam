@@ -275,7 +275,7 @@
   async function submitExam(expired) {
     const e = state.exam; if (!e || e.submitting) return;
     const qs = e.data.questions || []; const unanswered = qs.filter(function (q) { return !hasAnswer(e.answers[q.id]); }).length;
-    if (!expired && !await modal('提交这份试卷？', (unanswered ? '还有 ' + unanswered + ' 道题未作答。\n' : '所有题目已作答。\n') + '交卷后可以查看参考答案、评分标准和逐题复盘，不能继续修改作答。', { confirm: '确认交卷' })) return;
+    if (!expired && !await modal('提交这份试卷？', (unanswered ? '还有 ' + unanswered + ' 道题未作答。\n' : '所有题目已作答。\n') + '交卷后不能继续修改作答；成绩公布后可查看分数、参考答案和解析。', { confirm: '确认交卷' })) return;
     clearTimeout(saveTimer);
     if (e.savePromise) { try { await e.savePromise; } catch (_) {} }
     e.submitting = true; persistExam(e); $$('[data-answer], [data-action="submit"]').forEach(function (el) { el.disabled = true; });
@@ -284,7 +284,7 @@
       const d = await api('/api/attempts/' + encodeURIComponent(e.id) + '/submit', { method: 'POST', body: { answers: clone(e.answers), flags: Array.from(e.flags), ai_grade: false } });
       e.submitted = true; localRemove('draft-' + e.id); e.dirty = false; state.overview = null;
       if (d.job_id) watchJob(d.job_id, 'grade', e.id);
-      toast(expired ? '考试时间已到，试卷已自动提交。' : '交卷完成，等待教师公布成绩。'); nav('review/' + e.id);
+      toast(expired ? '考试时间已到，试卷已自动提交。' : '交卷完成，可在答卷页面查看阅卷进度。'); nav('review/' + e.id);
     } catch (err) { e.submitting = false; e.error = err.message; $$('[data-answer], [data-action="submit"]').forEach(function (el) { el.disabled = false; }); updateSaveState(e); throw err; }
   }
   async function renderHistory(serial) {
@@ -306,7 +306,14 @@
   async function renderReview(id, serial) {
     const d = await api('/api/attempts/' + encodeURIComponent(id)); if (serial !== state.routeSerial) return;
     if (active(d.attempt)) { nav('exam/' + id); return; }
-    if (!ADMIN && !d.attempt.released) { main.innerHTML = '<section class="card card-pad"><div class="eyebrow">已交卷</div><h1>等待教师公布成绩</h1><p>答案已经保存。教师完成阅卷并公布后，即可查看分数、参考答案和解析。</p><a class="btn btn-primary" href="#history">返回考试记录</a></section>'; return; }
+    if (!ADMIN && !d.attempt.released) {
+      const busy = ['queued','running'].includes(d.grading_status);
+      const title = busy ? '正在自动阅卷' : d.grading_status === 'failed' ? '阅卷待处理' : '等待教师公布成绩';
+      main.innerHTML = '<section class="card card-pad"><div class="eyebrow">已交卷</div><h1>' + title + '</h1><p>' + (busy ? '答案已保存，正在排队或评阅。启用自动公布时，评分完成后会自动显示成绩。此页会自动更新，也可以稍后在考试记录中查看。' : d.grading_status === 'failed' ? '答案已保存。自动阅卷暂未完成，请联系教师处理。' : '教师公布后即可查看分数、参考答案和解析。') + '</p><a class="btn btn-primary" href="#history">返回考试记录</a></section>';
+      clearTimeout(state.examTimer);
+      if (busy) state.examTimer = setTimeout(function () { if (serial === state.routeSerial) renderReview(id, serial).catch(function(err){ toast(err.message,true); }); }, 8000);
+      return;
+    }
     state.review = d; const a = d.attempt; const p = d.paper; const qs = d.questions || []; const responses = d.responses || {};
     state.gradeDrafts = localGet('grades-' + a.id) || {};
     const scored = qs.filter(function (q) { return responses[q.id] && responses[q.id].score != null; });
@@ -402,13 +409,19 @@
   }
   async function renderAdmin(serial) {
     await overview();
-    const results = await Promise.all([api('/api/papers?all=1'), api('/api/ai/status')]); if (serial !== state.routeSerial) return;
+    const results = await Promise.all([api('/api/papers?all=1'), api('/api/ai/status'), api('/api/admin/grading-settings')]); if (serial !== state.routeSerial) return;
     state.adminPapers = results[0].papers || []; state.ai = results[1];
     const papers = state.adminPapers; const templates = papers.filter(function (p) { return p.status !== 'archived'; });
     main.innerHTML = '<div class="page-head"><div><div class="eyebrow">TEACHER DESK</div><h1>给练习，添一点针对性。</h1><p>维护题目、调整知识范围，或用 AI 生成一套新题。生成的新卷先保存为草稿，审核后再给学生作答。</p></div><button class="btn btn-primary" data-action="new-paper">＋ 新建试卷</button></div><div class="admin-grid"><section class="card ai-card"><h2>✧ AI 一键出题</h2><p>以已有试卷为结构模板，保持科目、考试时间、题型和分值分布；按你填写的范围生成原创题目。</p>' + aiStatusHtml() +
       '<form id="generator-form" class="generator-form"><label><span class="form-label">结构模板</span><select name="template_id" id="generation-template" required>' + templates.map(function (p) { return '<option value="' + esc(p.id) + '">' + esc(p.title) + (p.status === 'draft' ? '（草稿）' : '') + '</option>'; }).join('') + '</select></label><label><span class="form-label">知识范围</span><textarea name="scope" id="generation-scope" required placeholder="例如：二次函数、圆的基本性质，侧重应用题…">' + esc(templates[0] ? templates[0].scope : '') + '</textarea></label><div class="two-columns"><label><span class="form-label">新卷标题</span><input name="title" placeholder="留空沿用模板标题" maxlength="120"></label><label><span class="form-label">难度</span><select name="difficulty"><option value="标准">标准 · 按中考梯度</option><option value="基础">基础 · 巩固知识</option><option value="提高">提高 · 综合应用</option></select></label></div><button class="btn btn-primary" type="submit"' + (!state.ai.configured || !templates.length ? ' disabled' : '') + '>生成新试卷草稿 →</button>' + (!state.ai.configured ? '<span class="form-help">请在服务器配置文件中填写 API key 后刷新页面。密钥只保存在服务器端。</span>' : '<span class="form-help">新题需检查题意、答案与评分标准，审核后再发布。</span>') + '</form></section>' +
       '<section class="card card-pad"><h2>从草稿，到一份好试卷</h2><div class="method-step"><b>1</b><div><h3>维护结构</h3><p>选择科目和分值结构，手动编辑题目、参考答案与评分标准。</p></div></div><div class="method-step"><b>2</b><div><h3>认真审核</h3><p>检查题意是否明确，知识范围是否合适，计算结果与参考答案是否正确。</p></div></div><div class="method-step"><b>3</b><div><h3>发布与阅卷</h3><p>发布后可开始考试；交卷后支持客观题自动判分、AI 阅卷与人工修订。</p></div></div><div class="notice small" style="margin-top:19px;margin-bottom:0">考试会保存试卷快照。之后修改题库，不会改变已经开始的考试和历史答卷。</div></section></div><div id="admin-job-host"></div>' +
       '<div class="section-heading"><h2>试卷与题库</h2><span>共 ' + papers.length + ' 份试卷</span></div><div class="filter-row"><select id="admin-subject" aria-label="按科目筛选"><option value="">全部科目</option>' + (state.overview.subjects || []).map(function (s) { return '<option value="' + esc(s.code) + '">' + esc(s.name) + '</option>'; }).join('') + '</select><select id="admin-status" aria-label="按发布状态筛选"><option value="">全部状态</option><option value="published">已发布</option><option value="draft">草稿</option></select></div><div class="card table-wrap" id="admin-paper-table"></div>' + sourceNotice();
+    main.insertAdjacentHTML('afterbegin', '<section class="card card-pad" style="margin-bottom:20px"><h2>交卷后自动处理</h2><form id="grading-settings-form"><label><input type="checkbox" name="auto_grade"' + (results[2].auto_grade ? ' checked' : '') + '> 交卷后自动 AI 阅卷</label><br><label><input type="checkbox" name="auto_release"' + (results[2].auto_release ? ' checked' : '') + '> 全部评分完成后自动公布成绩</label><p class="small muted">设置用于此后交卷的试卷。纯客观题或全部空白题无需 AI；AI 失败不会公布不完整成绩。已排队任务保留交卷时设置，教师可复核、修改或撤回成绩。</p><button class="btn" type="submit">保存设置</button></form></section>');
+    $('#grading-settings-form').onsubmit = async function(event) {
+      event.preventDefault(); event.stopPropagation(); const form=event.target; const button=form.querySelector('button'); button.disabled=true;
+      try { await api('/api/admin/grading-settings',{method:'PUT',body:{auto_grade:form.elements.auto_grade.checked,auto_release:form.elements.auto_release.checked}}); toast('自动阅卷设置已保存。'); }
+      catch(err) { toast(err.message,true); } finally { button.disabled=false; }
+    };
     renderAdminTable(); renderJobHosts();
   }
   function renderAdminTable() {

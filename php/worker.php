@@ -9,6 +9,7 @@ if (!$lock || !flock($lock,LOCK_EX|LOCK_NB)) exit;
 sql("UPDATE jobs SET status='failed',error='后台进程中断，未完成任务已停止，请手动重试。',updated_at=? WHERE status='running'",[stamp()]);
 $once=in_array('--once',$argv,true);
 do {
+    transaction(fn()=>expire_attempts());
     $job=transaction(function() {
         $r=sql("SELECT * FROM jobs WHERE status='queued' ORDER BY created_at LIMIT 1".(mysql_mode()?' FOR UPDATE':''))->fetch();
         if ($r) job_update($r['id'],['status'=>'running','message'=>'任务开始…']); return $r;
