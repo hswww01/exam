@@ -1,0 +1,22 @@
+[Unit]
+Description=Yixue exam AI queue worker
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=/opt/yixue-exam
+ExecStart=/usr/bin/php /opt/yixue-exam/php/worker.php
+Restart=always
+RestartSec=5
+TimeoutStopSec=650
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/opt/yixue-exam/.worker.lock
+
+[Install]
+WantedBy=multi-user.target

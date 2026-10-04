@@ -1,0 +1,27 @@
+.env
+.env.local
+*.db
+*.db-shm
+*.db-wal
+*.log
+*.pid
+__pycache__/
+.pytest_cache/
+
+.runtime/
+.setup-code
+.server-setup-code
+.migration.json
+.worker.lock
+
+client/vendor/
+client/dist/*.obj
+
+# Local packages and generated artifacts
+client/dist*/
+client/*.zip
+*.obj
+*.exe
+*.dll
+*.lib
+validation/

@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#11253c">
+  <title>亦学 · 家长后台</title>
+  <link rel="stylesheet" href="/app.css">
+</head>
+<body data-admin="true">
+  <aside class="sidebar" aria-label="主导航">
+    <a class="brand" href="#home" aria-label="亦学首页"><span class="brand-mark">亦</span><span>亦学<small>九年级 · 考试练习</small></span></a>
+    <div class="sidebar-caption">把每一次练习，变成进步。</div>
+    <nav>
+      <a href="/">学生考试页 ↗</a>
+      <a href="#history" data-nav="history"><span aria-hidden="true">◷</span>答卷与成绩</a>
+      <a href="#admin" data-nav="admin"><span aria-hidden="true">▤</span>题库与出题</a>
+    <button class="btn" data-action="logout">退出后台</button></nav>
+    <div class="sidebar-bottom"><span class="status-dot"></span>家庭学习空间<small>题目与答卷保存在服务器</small><p>北京中考书面考试结构<br>九上期中知识范围 · 原创模拟</p></div>
+  </aside>
+  <div class="workspace">
+    <header class="topbar"><div id="breadcrumb">学习桌</div><div class="topbar-meta"><span class="tiny-pill">2026 · 北京</span><span id="today"></span></div></header>
+    <main id="main" tabindex="-1"><div class="loading"><span class="spinner"></span>正在打开学习空间…</div></main>
+    <footer class="site-footer">亦学 · 用练习发现问题，用复盘看见进步。<span>家庭学习工具</span></footer>
+  </div>
+  <div id="toast" role="status" aria-live="polite"></div>
+  <div id="modal" class="modal-backdrop" hidden></div>
+  <script src="/app.js" defer></script>
+</body>
+</html>

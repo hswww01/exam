@@ -1,0 +1,12 @@
+CREATE TABLE IF NOT EXISTS papers(id TEXT PRIMARY KEY,subject_code TEXT NOT NULL,status TEXT NOT NULL,metadata_json TEXT NOT NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS questions(paper_id TEXT NOT NULL REFERENCES papers(id),id TEXT NOT NULL,seq INTEGER NOT NULL,data_json TEXT NOT NULL,PRIMARY KEY(paper_id,id));
+CREATE TABLE IF NOT EXISTS attempts(id TEXT PRIMARY KEY,paper_id TEXT NOT NULL REFERENCES papers(id),student_name TEXT NOT NULL,started_at TEXT NOT NULL,deadline TEXT NOT NULL,status TEXT NOT NULL DEFAULT 'active',submitted_at TEXT,snapshot_json TEXT NOT NULL,answers_json TEXT NOT NULL DEFAULT '{}',flags_json TEXT NOT NULL DEFAULT '[]',grades_json TEXT NOT NULL DEFAULT '{}',released INTEGER NOT NULL DEFAULT 0,owner_hash TEXT NOT NULL DEFAULT '');
+CREATE TABLE IF NOT EXISTS jobs(id TEXT PRIMARY KEY,type TEXT NOT NULL,target_id TEXT NOT NULL,status TEXT NOT NULL,progress INTEGER NOT NULL DEFAULT 0,message TEXT NOT NULL DEFAULT '',result_json TEXT NOT NULL DEFAULT '{}',error TEXT NOT NULL DEFAULT '',created_at TEXT NOT NULL,updated_at TEXT NOT NULL,payload_json TEXT NOT NULL DEFAULT '{}');
+CREATE TABLE IF NOT EXISTS grade_history(id INTEGER PRIMARY KEY AUTOINCREMENT,attempt_id TEXT NOT NULL,question_id TEXT NOT NULL,grade_json TEXT NOT NULL,created_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY,value TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS admin_sessions(token_hash TEXT PRIMARY KEY,expires INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS login_failures(client TEXT NOT NULL,created INTEGER NOT NULL);
+CREATE INDEX IF NOT EXISTS idx_attempts_status ON attempts(status);
+CREATE INDEX IF NOT EXISTS idx_failures_created ON login_failures(created);
+CREATE TABLE IF NOT EXISTS paper_scans(id TEXT PRIMARY KEY,paper_title TEXT NOT NULL,student_name TEXT NOT NULL,status TEXT NOT NULL,snapshot_json TEXT NOT NULL,recognized_json TEXT NOT NULL,attempt_id TEXT NOT NULL,created_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS scan_pages(id TEXT PRIMARY KEY,scan_id TEXT NOT NULL REFERENCES paper_scans(id),seq INTEGER NOT NULL,name TEXT NOT NULL,data_url TEXT NOT NULL);
