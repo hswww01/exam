@@ -5,7 +5,7 @@ function ai_status(): array {
     $c=config(); return ['configured'=>!empty($c['OPENAI_API_KEY']),'model'=>$c['OPENAI_MODEL'] ?? 'gpt-6-luna','service_tier'=>'flex','base_url'=>$c['OPENAI_BASE_URL'] ?? 'https://api.openai.com/v1'];
 }
 function object_schema(array $props): array { return ['type'=>'object','properties'=>$props,'required'=>array_keys($props),'additionalProperties'=>false]; }
-function ai_call(string $kind,array $payload,?array $vision=null): array {
+function ai_request(string $kind,array $payload,?array $vision=null): object {
     $c=config(); if (empty($c['OPENAI_API_KEY'])) throw new ApiError('尚未配置 API key。',503);
     $base=rtrim($c['OPENAI_BASE_URL'] ?? 'https://api.openai.com/v1','/');
     if (!str_starts_with($base,'https://')) throw new ApiError('AI 服务地址须使用 HTTPS。');
@@ -20,10 +20,18 @@ function ai_call(string $kind,array $payload,?array $vision=null): array {
         $body['input']=[['role'=>'user','content'=>[['type'=>'input_text','text'=>j($payload)],['type'=>'input_image','image_url'=>$vision['image'],'detail'=>'high']]]];
     }
     if (preg_match('/^(gpt-[56]|o[34])/',$body['model'])) $body['reasoning']=['effort'=>$c['OPENAI_REASONING_EFFORT'] ?? 'medium'];
-    $ch=curl_init($base.'/responses'); $raw=''; $tooLarge=false;
-    curl_setopt_array($ch,[CURLOPT_POST=>true,CURLOPT_POSTFIELDS=>j($body),CURLOPT_HTTPHEADER=>['Content-Type: application/json','Authorization: Bearer '.$c['OPENAI_API_KEY']],CURLOPT_CONNECTTIMEOUT=>15,CURLOPT_TIMEOUT=>max(900,min(1800,(int)($c['OPENAI_TIMEOUT'] ?? 900))),CURLOPT_FOLLOWLOCATION=>false,CURLOPT_SSL_VERIFYPEER=>true,CURLOPT_SSL_VERIFYHOST=>2,CURLOPT_WRITEFUNCTION=>function($ch,$chunk)use(&$raw,&$tooLarge){ if (strlen($raw)+strlen($chunk)>8000000) { $tooLarge=true; return 0; } $raw.=$chunk; return strlen($chunk); }]);
+    $ch=curl_init($base.'/responses'); $request=(object)['handle'=>$ch,'raw'=>'','tooLarge'=>false];
+    curl_setopt_array($ch,[CURLOPT_POST=>true,CURLOPT_POSTFIELDS=>j($body),CURLOPT_HTTPHEADER=>['Content-Type: application/json','Authorization: Bearer '.$c['OPENAI_API_KEY']],CURLOPT_CONNECTTIMEOUT=>15,CURLOPT_TIMEOUT=>max(900,min(1800,(int)($c['OPENAI_TIMEOUT'] ?? 900))),CURLOPT_FOLLOWLOCATION=>false,CURLOPT_SSL_VERIFYPEER=>true,CURLOPT_SSL_VERIFYHOST=>2,CURLOPT_WRITEFUNCTION=>function($ch,$chunk)use($request){ if (strlen($request->raw)+strlen($chunk)>8000000) { $request->tooLarge=true; return 0; } $request->raw.=$chunk; return strlen($chunk); }]);
     if (!empty($c['OPENAI_PROXY'])) curl_setopt($ch,CURLOPT_PROXY,$c['OPENAI_PROXY']);
-    $ok=curl_exec($ch); $code=curl_getinfo($ch,CURLINFO_RESPONSE_CODE);
+    return $request;
+}
+function ai_call(string $kind,array $payload,?array $vision=null): array {
+    $request=ai_request($kind,$payload,$vision);
+    return ai_finish($request,curl_exec($request->handle)!==false);
+}
+function ai_finish(object $request,bool $ok): array {
+    $ch=$request->handle; $raw=$request->raw; $tooLarge=$request->tooLarge;
+    $code=curl_getinfo($ch,CURLINFO_RESPONSE_CODE);
     $errno=curl_errno($ch); $elapsed=curl_getinfo($ch,CURLINFO_TOTAL_TIME); $connected=curl_getinfo($ch,CURLINFO_CONNECT_TIME); $tls=curl_getinfo($ch,CURLINFO_APPCONNECT_TIME);
     curl_close($ch);
     if ($ok===false) {
@@ -70,30 +78,75 @@ function create_job(string $kind,string $target,array $data): string {
         return $id;
     });
 }
-function generate_job(array $job): array {
-    [$p,$qs]=get_paper($job['target_id']); $data=decode($job['payload_json']); $batches=[];
-    foreach ($qs as $q) {
-        $last=count($batches)-1; $prev=$last>=0 ? end($batches[$last]) : null;
-        if ($prev && ((!empty($q['passage']) && $q['passage']===$prev['passage']) || (empty($q['passage']) && empty($prev['passage']) && $q['section']===$prev['section'] && count($batches[$last])<4))) $batches[$last][]=$q;
-        else $batches[]=[$q];
-    }
-    $generated=[];
-    foreach ($batches as $i=>$batch) {
-        job_update($job['id'],['progress'=>(int)($i/count($batches)*90),'message'=>'正在编写第'.($i+1).'/'.count($batches).'组题目…']);
-        $r=ai_call('generate',['subject'=>array_column(subjects(),'name','code')[$p['subject_code']],'scope'=>($data['scope'] ?? '') ?: $p['scope'],'difficulty'=>$data['difficulty'] ?? '标准','blueprint'=>$p['blueprint'],'slots_and_examples'=>$batch]);
-        $items=$r['questions'] ?? [];
-        if (!is_array($items) || count($items)!==count($batch)) throw new ApiError('AI 返回题数不匹配，未保存。');
-        foreach ($batch as $n=>$slot) {
-            $item=$items[$n]; if (!is_array($item) || ($item['label'] ?? null)!==$slot['label']) throw new ApiError('AI 返回题号不匹配，未保存。');
-            foreach (['stem','passage','options','answer','rubric','explanation'] as $k) $slot[$k]=$item[$k] ?? null;
-            $slot['id']=uid(); unset($slot['figure'],$slot['figure_alt']);
-            if ($slot['kind']==='multi' && is_string($slot['answer'])) $slot['answer']=preg_split('/[,，\s]+/u',$slot['answer'],-1,PREG_SPLIT_NO_EMPTY);
-            $generated[]=$slot;
+function generation_checkpoint(string $id,array $checkpoint): void {
+    $upsert=mysql_mode()?' ON DUPLICATE KEY UPDATE value=VALUES(value)':' ON CONFLICT(`key`) DO UPDATE SET value=excluded.value';
+    sql("INSERT INTO settings(`key`,value) VALUES(?,?)".$upsert,['generation_'.$id,j($checkpoint)]);
+}
+function generation_items(array $batch,array $response): array {
+    $items=$response['questions'] ?? []; $generated=[];
+    if (!is_array($items) || count($items)!==count($batch)) throw new ApiError('AI 返回题数不匹配，该批未保存。');
+    foreach ($batch as $n=>$slot) {
+        $item=$items[$n]; if (!is_array($item) || ($item['label'] ?? null)!==$slot['label']) throw new ApiError('AI 返回题号不匹配，该批未保存。');
+        foreach (['stem','passage','options','answer','rubric','explanation'] as $k) {
+            if (!array_key_exists($k,$item)) throw new ApiError('AI 返回字段不完整。');
+            $slot[$k]=$item[$k];
         }
+        if (!is_string($slot['stem']) || !trim($slot['stem']) || !is_array($slot['options'])) throw new ApiError('AI 题目格式无效。');
+        $slot['id']=uid(); unset($slot['figure'],$slot['figure_alt']);
+        if ($slot['kind']==='multi' && is_string($slot['answer'])) $slot['answer']=preg_split('/[,，\s]+/u',$slot['answer'],-1,PREG_SPLIT_NO_EMPTY);
+        $generated[]=$slot;
     }
-    $p['title']=($data['title'] ?? '') ?: $p['title'].' · AI新卷'; $p['scope']=($data['scope'] ?? '') ?: $p['scope'];
-    $p['description']='AI原创练习草稿；请审核题意、答案与评分标准后发布。'; $p['source_note']='AI生成，模型 '.ai_status()['model'].'。沿用模板结构，尚未经人工审题。'; $p['questions']=$generated;
-    normalize_paper($p,true); $id=uid(); transaction(fn()=>save_paper($id,$p)); return ['paper_id'=>$id];
+    return $generated;
+}
+function generate_job(array $job): array {
+    $stored=sql("SELECT value FROM settings WHERE `key`=?",['generation_'.$job['id']])->fetchColumn();
+    if ($stored) $cp=decode($stored);
+    else {
+        [$p,$qs]=get_paper($job['target_id']); $batches=[];
+        foreach ($qs as $q) {
+            $last=count($batches)-1; $prev=$last>=0?end($batches[$last]):null;
+            $short=in_array($q['kind'],['choice','multi','number']);
+            $limit=$short && $last>=0 && !array_filter($batches[$last],fn($x)=>!in_array($x['kind'],['choice','multi','number']))?6:4;
+            if ($prev && $q['section']===$prev['section'] && ((!empty($q['passage']) && $q['passage']===$prev['passage']) || (empty($q['passage']) && empty($prev['passage']) && count($batches[$last])<$limit))) $batches[$last][]=$q;
+            else $batches[]=[$q];
+        }
+        $cp=['paper'=>$p,'batches'=>$batches,'done'=>[],'paper_id'=>uid()]; generation_checkpoint($job['id'],$cp);
+    }
+    if (sql('SELECT 1 FROM papers WHERE id=?',[$cp['paper_id']])->fetchColumn()) return ['paper_id'=>$cp['paper_id']];
+    $p=$cp['paper']; $data=decode($job['payload_json']);$total=count($cp['batches']);
+    $todo=[];foreach($cp['batches'] as $i=>$batch)if(!isset($cp['done'][$i]))$todo[]=$i;
+    $multi=curl_multi_init();$running=[];$errors=[];
+    try {
+        while ($todo || $running) {
+            while (!$errors && $todo && count($running)<3) {
+                $i=array_shift($todo);
+                $r=ai_request('generate',['subject'=>array_column(subjects(),'name','code')[$p['subject_code']],'scope'=>($data['scope'] ?? '')?:$p['scope'],'difficulty'=>$data['difficulty'] ?? '标准','blueprint'=>$p['blueprint'],'slots_and_examples'=>$cp['batches'][$i]]);
+                curl_multi_add_handle($multi,$r->handle);$running[spl_object_id($r->handle)]=[$i,$r];
+            }
+            if(!$running)break;
+            job_update($job['id'],['progress'=>(int)(count($cp['done'])/max(1,$total)*95),'message'=>'本套试卷已完成 '.count($cp['done']).'/'.$total.' 批，'.count($running).' 批生成中（Flex）。']);
+            do {$rc=curl_multi_exec($multi,$active);}while($rc===CURLM_CALL_MULTI_PERFORM);
+            if($rc!==CURLM_OK)throw new ApiError('并行请求调度失败，已完成批次已保存。');
+            while($info=curl_multi_info_read($multi)) {
+                $key=spl_object_id($info['handle']);[$i,$r]=$running[$key];
+                curl_multi_remove_handle($multi,$r->handle);unset($running[$key]);
+                try {
+                    $items=generation_items($cp['batches'][$i],ai_finish($r,$info['result']===CURLE_OK));
+                    // Validate this batch against its own point totals before checkpointing.
+                    $batchPaper=$p; $sections=[];foreach($items as $q)$sections[$q['section']]=($sections[$q['section']] ?? 0)+$q['points'];
+                    $batchPaper['max_score']=array_sum($sections);$batchPaper['blueprint']=array_map(fn($section,$points)=>['section'=>$section,'points'=>$points],array_keys($sections),array_values($sections));
+                    $batchPaper['questions']=$items;normalize_paper($batchPaper,true);
+                    $cp['done'][$i]=$items; generation_checkpoint($job['id'],$cp);
+                }catch(ApiError $e){$errors[]='第'.($i+1).'批：'.$e->getMessage();}
+            }
+            if($running && curl_multi_select($multi,1.0)===-1)usleep(10000);
+        }
+    } finally {foreach($running as [$i,$r]){curl_multi_remove_handle($multi,$r->handle);curl_close($r->handle);}curl_multi_close($multi);}
+    if($errors)throw new ApiError('已保存 '.count($cp['done']).'/'.$total.' 批。'.implode('；',$errors).' 可继续未完成批次。',503);
+    $generated=[];foreach($cp['batches'] as $i=>$batch)array_push($generated,...$cp['done'][$i]);
+    $p['title']=($data['title'] ?? '')?:$p['title'].' · AI新卷';$p['scope']=($data['scope'] ?? '')?:$p['scope'];
+    $p['description']='AI原创练习草稿；请审核后发布。';$p['source_note']='AI生成，模型 '.ai_status()['model'].'。';$p['questions']=$generated;
+    normalize_paper($p,true);transaction(fn()=>save_paper($cp['paper_id'],$p));return ['paper_id'=>$cp['paper_id']];
 }
 function grade_job(array $job): array {
     $r=get_attempt($job['target_id']); $snap=decode($r['snapshot_json']); $answers=decode($r['answers_json']); $old=decode($r['grades_json']);

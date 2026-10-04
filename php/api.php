@@ -75,9 +75,21 @@ function api(string $method,string $path,array $query,array $data): array {
     if ($method==='GET' && preg_match('~^/api/lists/([a-z]+)$~D',$path,$m)) return list_api($m[1],$query,$admin,$owner);
     if ($path==='/api/ai/status' && $method==='GET') return ai_status();
     if ($path==='/api/jobs' && $method==='GET') {
-        $jobs=sql("SELECT * FROM jobs WHERE status IN ('queued','running') ORDER BY created_at DESC LIMIT 20")->fetchAll();
+        $jobs=sql("SELECT * FROM jobs WHERE status IN ('queued','running') OR (type='generate' AND status='failed') ORDER BY created_at DESC,id DESC LIMIT 20")->fetchAll();
         foreach ($jobs as &$job) { unset($job['payload_json']); $job['result']=decode($job['result_json']); unset($job['result_json']); }
         return ['jobs'=>$jobs];
+    }
+    if ($method==='POST' && preg_match('~^/api/jobs/([a-f0-9]+)/retry$~D',$path,$match)) {
+        return transaction(function() use($match) {
+            sql("SELECT value FROM settings WHERE `key`='queue_lock'".(mysql_mode()?' FOR UPDATE':''))->fetch();
+            $job=sql('SELECT * FROM jobs WHERE id=?'.(mysql_mode()?' FOR UPDATE':''),[$match[1]])->fetch();
+            if (!$job || $job['type']!=='generate') throw new ApiError('出题任务不存在。',404);
+            if ($job['status']!=='failed') throw new ApiError('只有失败的任务可以继续。',409);
+            if (sql("SELECT 1 FROM jobs WHERE type='generate' AND target_id=? AND status IN ('queued','running')",[$job['target_id']])->fetchColumn()) throw new ApiError('该模板已有出题任务，请等待完成。',409);
+            if ((int)sql("SELECT COUNT(*) FROM jobs WHERE status IN ('queued','running')")->fetchColumn()>=4) throw new ApiError('队列繁忙，请稍后继续。',429);
+            job_update($job['id'],['status'=>'queued','error'=>'','message'=>'等待继续未完成批次，已完成批次不会重复生成。']);
+            return ['job_id'=>$job['id'],'target_id'=>$job['target_id']];
+        });
     }
     if ($method==='GET' && preg_match('~^/api/jobs/([\w-]+)$~',$path,$m)) {
         $job=sql('SELECT * FROM jobs WHERE id=?',[$m[1]])->fetch(); if (!$job) throw new ApiError('任务不存在。',404);

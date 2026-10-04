@@ -446,6 +446,7 @@
   function persistJobs() { localSet('jobs', Object.values(state.jobs).filter(function (j) { return j.status === 'queued' || j.status === 'running'; }).map(function (j) { return { id: j.id, localType: j.localType, target: j.target }; })); }
   function jobHtml(j) {
     const failed = j.status === 'failed'; const done = j.status === 'completed'; let action = '';
+    if (failed && j.localType === 'generate') action='<button type="button" class="btn btn-primary btn-small" data-action="retry-generation" data-id="'+esc(j.id)+'">继续未完成批次</button>';
     if (done && j.result && j.result.scan_id) action = '<a class="btn btn-primary btn-small" href="#scan/' + esc(j.result.scan_id) + '">核对照片识别结果 →</a>';
     if (done && j.result && j.result.paper_id) action = '<a class="btn btn-primary btn-small" href="#editor/' + esc(j.result.paper_id) + '">查看并审核新试卷 →</a>';
     if (done && j.result && j.result.attempt_id) action = '<a class="btn btn-primary btn-small" href="#review/' + esc(j.result.attempt_id) + '">查看阅卷结果 →</a>';
@@ -683,7 +684,12 @@
     const action = button.dataset.action; const id = button.dataset.id;
     if (button.tagName === 'BUTTON') event.preventDefault();
     try {
-      if (action === 'logout') { await api('/api/auth/logout',{method:'POST',body:{}}); adminToken = ''; state.overview = null; state.review = null; state.editor = null; Object.keys(privateDrafts).forEach(function(k){delete privateDrafts[k];}); state.jobs = {}; await route(); }
+      if (action === 'retry-generation') {
+        button.disabled=true;
+        try { const d=await api('/api/jobs/'+encodeURIComponent(id)+'/retry',{method:'POST',body:{}}); delete state.jobs[id];watchJob(d.job_id,'generate',d.target_id);toast('已加入队列，将继续未完成批次。'); }
+        finally { button.disabled=false; }
+      }
+      else if (action === 'logout') { await api('/api/auth/logout',{method:'POST',body:{}}); adminToken = ''; state.overview = null; state.review = null; state.editor = null; Object.keys(privateDrafts).forEach(function(k){delete privateDrafts[k];}); state.jobs = {}; await route(); }
       else if (action === 'release') { await api('/api/attempts/' + id + '/release',{method:'POST',body:{released:!state.review.attempt.released}}); state.overview=null; await renderReview(id,state.routeSerial); }
       else if (action === 'reload') await route();
       else if (action === 'start') { button.disabled = true; try { await startExam(id); } finally { button.disabled = false; } }
