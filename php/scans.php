@@ -8,7 +8,7 @@ function get_scan(string $id,bool $lock=false): array {
 function scan_busy(string $id): bool { return (bool)sql("SELECT id FROM jobs WHERE type='ocr' AND target_id=? AND status IN ('queued','running')",[$id])->fetch(); }
 function scans_api(string $method,string $path,array $data): array {
     if ($path==='/api/admin/scans') {
-        if ($method==='GET') return ['scans'=>sql('SELECT id,paper_title,student_name,status,attempt_id,created_at FROM paper_scans ORDER BY created_at DESC LIMIT 100')->fetchAll()];
+        if ($method==='GET') { $out=list_api('scans',$_GET,true,''); return ['scans'=>$out['items'],'pagination'=>$out['pagination']]; }
         if ($method==='POST') {
             [$p,$qs]=get_paper((string)($data['paper_id'] ?? '')); normalize_paper($p+['questions'=>$qs],true);
             $id=uid(); $name=strval_checked($data['student_name'] ?? '同学','考生称呼',50,true);

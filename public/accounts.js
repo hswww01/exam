@@ -47,10 +47,11 @@
     });
   }
   async function manage() {
-    const U = ui(), serial = U.state.routeSerial, result = await U.api('/api/admin/students');
+    const U = ui(), serial = U.state.routeSerial, result = {students:[],unassigned:[]};
     if (serial !== U.state.routeSerial) return;
     document.getElementById('breadcrumb').textContent = '学生账号';
-    U.main.innerHTML = '<div class="page-head"><div><h1>学生账号</h1><p>学生在考试首页自行注册：8位学号、姓名和自设密码。此处可修改姓名、重置密码、停用账号，并归属历史答卷。</p></div></div><div class="card table-wrap"><table class="data-table"><thead><tr><th>学号 / 姓名</th><th>班级</th><th>状态</th><th>操作</th></tr></thead><tbody>' + result.students.map(s => '<tr><td>' + U.esc(s.username) + '<br>' + U.esc(s.name) + '</td><td>' + U.esc(s.class_name) + '</td><td>' + (Number(s.enabled) ? '启用' : '停用') + '</td><td><button class="btn btn-small" data-student-edit="' + U.esc(s.id) + '">管理</button></td></tr>').join('') + '</tbody></table>' + (!result.students.length ? '<p class="card-pad">还没有学生注册。</p>' : '') + '</div><div id="student-edit-panel"></div><section class="card card-pad" style="margin-top:24px"><h2>历史答卷归属</h2><p>旧浏览器身份的答卷和上传图片生成的答卷，可由教师明确分配给学生；已归属的答卷不会重复分配。</p>' + (result.unassigned.length && result.students.length ? '<form id="assign-attempt"><label class="form-label">答卷<select name="attempt_id" required>' + result.unassigned.map(a => '<option value="' + U.esc(a.id) + '">' + U.esc(a.student_name + ' · ' + a.started_at + ' · ' + a.id.slice(0, 8)) + '</option>').join('') + '</select></label><label class="form-label">归属学生<select name="student_id" required>' + result.students.map(s => '<option value="' + U.esc(s.id) + '">' + U.esc(s.username + ' · ' + s.name) + '</option>').join('') + '</select></label><button class="btn" type="submit">确认归属</button></form>' : '<p>暂无可分配的答卷，或尚未创建学生账号。</p>') + '</section>';
+    U.main.innerHTML = '<div class="page-head"><div><h1>学生账号</h1><p>学生在考试首页自行注册：8位学号、姓名和自设密码。此处可修改姓名、重置密码、停用账号，并归属历史答卷。</p></div></div><div id="student-list" class="card table-wrap"><table class="data-table"><thead><tr><th>学号 / 姓名</th><th>班级</th><th>状态</th><th>操作</th></tr></thead><tbody>' + result.students.map(s => '<tr><td>' + U.esc(s.username) + '<br>' + U.esc(s.name) + '</td><td>' + U.esc(s.class_name) + '</td><td>' + (Number(s.enabled) ? '启用' : '停用') + '</td><td><button class="btn btn-small" data-student-edit="' + U.esc(s.id) + '">管理</button></td></tr>').join('') + '</tbody></table>' + (!result.students.length ? '<p class="card-pad">还没有学生注册。</p>' : '') + '</div><div id="student-edit-panel"></div><section class="card card-pad" style="margin-top:24px"><h2>历史答卷归属</h2><p>旧浏览器身份的答卷和上传图片生成的答卷，可由教师明确分配给学生；已归属的答卷不会重复分配。</p>' + (true ? '<form id="assign-attempt"><label class="form-label">答卷<select name="attempt_id" required>' + result.unassigned.map(a => '<option value="' + U.esc(a.id) + '">' + U.esc(a.student_name + ' · ' + a.started_at + ' · ' + a.id.slice(0, 8)) + '</option>').join('') + '</select></label><label class="form-label">归属学生<select name="student_id" required>' + result.students.map(s => '<option value="' + U.esc(s.id) + '">' + U.esc(s.username + ' · ' + s.name) + '</option>').join('') + '</select></label><button class="btn" type="submit">确认归属</button></form>' : '<p>暂无可分配的答卷，或尚未创建学生账号。</p>') + '</section>';
+    function bindStudentButtons() {
     U.main.querySelectorAll('[data-student-edit]').forEach(b => b.onclick = () => {
       const s = result.students.find(x => x.id === b.dataset.studentEdit), panel = document.getElementById('student-edit-panel');
       panel.innerHTML = '<section class="card card-pad" style="margin-top:24px"><h2>管理学号 ' + U.esc(s.username) + '</h2><form id="student-edit-form">' + field('姓名', 'name', 'text', 'required maxlength="50" value="' + U.esc(s.name) + '"') + field('班级（选填）', 'class_name', 'text', 'maxlength="50" value="' + U.esc(s.class_name) + '"') + field('重置密码（留空保持原密码）', 'password', 'password', 'minlength="8" maxlength="72" autocomplete="new-password"') + '<label class="form-label">状态<select name="enabled"><option value="1"' + (Number(s.enabled) ? ' selected' : '') + '>启用</option><option value="0"' + (!Number(s.enabled) ? ' selected' : '') + '>停用</option></select></label><p class="small muted">停用或重置密码会撤销该学生所有设备的登录。请避免在其考试期间操作。</p><button class="btn btn-primary" type="submit">保存</button></form></section>';
@@ -59,6 +60,18 @@
         data.enabled = data.enabled === '1'; await U.api('/api/admin/students/' + s.id, { method: 'PUT', body: data }); U.toast('已保存。'); await manage();
       }); panel.scrollIntoView({ behavior: 'smooth' });
     });
+    }
+    const studentFilter=document.createElement('select'); studentFilter.setAttribute('aria-label','账号状态');
+    studentFilter.innerHTML='<option value="">全部账号</option><option value="1">启用</option><option value="0">停用</option>';
+    document.getElementById('student-list').before(studentFilter);
+    const reloadStudents=U.pagedList(document.getElementById('student-list'),'students',function(items){
+      result.students=items;
+      document.getElementById('student-list').innerHTML='<table class="data-table"><thead><tr><th>学号 / 姓名</th><th>班级</th><th>状态</th><th>操作</th></tr></thead><tbody>'+items.map(s=>'<tr><td>'+U.esc(s.username)+'<br>'+U.esc(s.name)+'</td><td>'+U.esc(s.class_name)+'</td><td>'+(Number(s.enabled)?'启用':'停用')+'</td><td><button class="btn btn-small" data-student-edit="'+U.esc(s.id)+'">管理</button></td></tr>').join('')+'</tbody></table>';
+      bindStudentButtons();
+    },()=>({enabled:studentFilter.value}));
+    studentFilter.onchange=reloadStudents;
+    U.pagedPicker(document.querySelector('#assign-attempt [name=attempt_id]'),'unassigned',a=>a.student_name+' · '+a.paper_title+' · '+a.started_at);
+    U.pagedPicker(document.querySelector('#assign-attempt [name=student_id]'),'students',s=>s.username+' · '+s.name);
     if (document.getElementById('assign-attempt')) bindForm('assign-attempt', async data => {
       if (!await U.modal('确认答卷归属？', '请核对学生和答卷，分配后该学生可访问这份答卷，成绩仍由教师控制公布。')) return;
       await U.api('/api/admin/students/' + data.student_id + '/assign', { method: 'POST', body: { attempt_id: data.attempt_id } }); U.toast('答卷已归属。'); U.state.overview = null; await manage();

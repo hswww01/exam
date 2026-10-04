@@ -55,6 +55,36 @@
     if (!res.ok) { if (res.status === 401 && !ADMIN && !path.startsWith('/api/student/')) { studentAccount = null; window.ExamAccounts.login(); } if (res.status === 401 && ADMIN && !path.startsWith('/api/auth/')) { adminToken = ''; renderLogin(); } const err = new Error(data.error || '请求未完成，请稍后重试。'); err.status = res.status; throw err; }
     return data;
   }
+  function pagedList(host, kind, render, filters) {
+    let page=1, size=20, search='', sequence=0;
+    const bar=document.createElement('div'); bar.className='list-controls';
+    bar.innerHTML='<input type="search" aria-label="搜索列表" placeholder="输入关键词搜索"><button type="button" class="btn list-search">搜索</button><select aria-label="每页条数"><option value="20">每页20条</option><option value="50">每页50条</option><option value="100">每页100条</option></select><span role="status"></span><button type="button" class="btn list-prev">上一页</button><button type="button" class="btn list-next">下一页</button>';
+    host.before(bar);
+    async function load(reset) {
+      if(reset)page=1; const ticket=++sequence;
+      const params=new URLSearchParams(Object.assign({page:page,page_size:size,search:search},filters?filters():{}));
+      bar.setAttribute('aria-busy','true');
+      try {
+        const d=await api('/api/lists/'+kind+'?'+params);
+        if(ticket!==sequence || !host.isConnected)return;
+        page=d.pagination.page; render(d.items,d.pagination); const meta=d.pagination;
+        bar.querySelector('[role=status]').textContent='共 '+meta.total+' 条 · 第 '+meta.page+' / '+meta.pages+' 页';
+        bar.querySelector('.list-prev').disabled=page<=1;bar.querySelector('.list-next').disabled=page>=meta.pages;
+      }catch(err){if(ticket===sequence && host.isConnected){bar.querySelector('[role=status]').textContent='加载失败，请重试';toast(err.message,true);}}
+      finally{if(ticket===sequence)bar.removeAttribute('aria-busy');}
+    }
+    bar.querySelector('.list-search').onclick=()=>{search=bar.querySelector('input').value.trim();load(true);};
+    bar.querySelector('input').onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();e.stopPropagation();bar.querySelector('.list-search').click();}};
+    bar.querySelector('select').onchange=e=>{size=Number(e.target.value);load(true);};
+    bar.querySelector('.list-prev').onclick=()=>{page--;load();};bar.querySelector('.list-next').onclick=()=>{page++;load();};
+    load();return ()=>load(true);
+  }
+  function pagedPicker(select,kind,label,onItems) {
+    return pagedList(select,kind,function(items){
+      select.innerHTML=items.length?items.map(item=>'<option value="'+esc(item.id)+'">'+esc(label(item))+'</option>').join(''):'<option value="">没有匹配结果</option>';
+      if(onItems)onItems(items);select.dispatchEvent(new Event('change',{bubbles:true}));
+    });
+  }
   function toast(message, error) {
     const el = $('#toast'); el.textContent = message; el.className = error ? 'show error' : 'show';
     clearTimeout(state.toastTimer); state.toastTimer = setTimeout(function () { el.className = ''; }, error ? 6500 : 3500);
@@ -158,11 +188,12 @@
   async function renderSubject(code, serial) {
     const subject = (state.overview.subjects || []).find(function (s) { return s.code === code; });
     if (!subject) throw new Error('找不到这个科目。');
-    const d = await api('/api/papers?subject=' + encodeURIComponent(code));
+    const d = {papers:[]};
     if (serial !== state.routeSerial) return;
     main.innerHTML = '<div class="page-head"><div><div class="eyebrow">SUBJECT / ' + esc(code.toUpperCase()) + '</div><h1>' + esc(subject.name) + '练习</h1><p>' + esc(subject.description) + '</p></div><a class="btn" href="#home">返回学习桌</a></div>' +
       '<div class="notice"><strong>' + esc(subject.minutes) + ' 分钟 · ' + esc(subject.full_score) + ' 分</strong><br>练习范围：' + esc(subject.scope) + (subject.note ? '<br>' + esc(subject.note) : '') + (subject.external_score ? '<br>本科目另有 ' + esc(subject.external_score) + ' 分单独考核，不计入本次书面模拟成绩。' : '') + '</div>' +
-      '<div class="paper-list">' + ((d.papers || []).length ? d.papers.map(function (p) { return '<article class="card paper-card"><div><h3>' + esc(p.title) + '</h3><p>' + esc(p.scope || p.description) + '</p><div class="paper-card-meta"><span>' + esc(p.minutes) + ' 分钟</span><span>满分 ' + esc(p.max_score) + ' 分</span><span>' + esc(p.question_count || '—') + ' 道题</span><span class="pill pill-green">原创模拟卷</span></div></div><div class="head-actions"><a class="btn" href="#paper/' + esc(p.id) + '">预览 / 打印</a><button class="btn btn-primary" data-action="start" data-id="' + esc(p.id) + '">开始考试 →</button></div></article>'; }).join('') : '<div class="card empty"><h3>暂时没有可用试卷</h3>可以在题库后台添加试卷或使用 AI 出题。</div>') + '</div>' + sourceNotice();
+      '<div class="paper-list" id="subject-papers"></div>' + sourceNotice();
+    pagedList($('#subject-papers'),'papers',function(items){ const d={papers:items}; $('#subject-papers').innerHTML = ((d.papers || []).length ? d.papers.map(function (p) { return '<article class="card paper-card"><div><h3>' + esc(p.title) + '</h3><p>' + esc(p.scope || p.description) + '</p><div class="paper-card-meta"><span>' + esc(p.minutes) + ' 分钟</span><span>满分 ' + esc(p.max_score) + ' 分</span><span>' + esc(p.question_count || '—') + ' 道题</span><span class="pill pill-green">原创模拟卷</span></div></div><div class="head-actions"><a class="btn" href="#paper/' + esc(p.id) + '">预览 / 打印</a><button class="btn btn-primary" data-action="start" data-id="' + esc(p.id) + '">开始考试 →</button></div></article>'; }).join('') : '<div class="card empty"><h3>暂时没有可用试卷</h3>可以在题库后台添加试卷或使用 AI 出题。</div>'); },()=>({subject:code}));
   }
   function printHeader(p, name) { return '<div class="print-header"><h1>' + esc(p.title) + '</h1><p>' + esc(subjectName(p.subject_code)) + ' · 考试时间 ' + esc(p.minutes) + ' 分钟 · 满分 ' + esc(p.max_score) + ' 分</p><p>' + (name ? '考生：' + esc(name) : '姓名：________________  日期：________________') + '</p></div>'; }
   function sectionBlocks(qs, renderer) {
@@ -199,7 +230,7 @@
     main.innerHTML = '<div class="page-head"><div><div class="eyebrow">PAPER PREVIEW</div><h1>' + esc(p.title) + '</h1><p>' + esc(p.scope) + '</p></div><div class="head-actions"><button class="btn" data-action="print">打印空白试卷</button><button class="btn btn-primary" data-action="start" data-id="' + esc(p.id) + '">开始考试 →</button></div></div><div class="notice">' + esc(p.minutes) + ' 分钟 · ' + esc(p.max_score) + ' 分 · ' + qs.length + ' 道题。预览不计时、不显示答案；开始考试后按服务端截止时间计时。</div>' + printHeader(p) + '<div class="paper-preview question-area">' + sectionBlocks(qs, blankQuestion) + '</div><div class="source-box">' + esc(p.source_note || '本卷为原创练习题。') + '</div>';
   }
   async function startExam(id) {
-    const p = (state.overview.papers || []).find(function (x) { return x.id === id; });
+    const p = (state.overview.papers || []).find(function (x) { return x.id === id; }) || (await api('/api/papers/' + encodeURIComponent(id))).paper;
     const name = await modal('准备开始考试', (p ? p.title + '\n' + p.minutes + ' 分钟，满分 ' + p.max_score + ' 分。\n' : '') + '点击开始后持续计时，关闭网页或离开页面也不会暂停。到时将自动交卷。', { confirm: '开始考试' });
     if (!name) return;
     const d = await api('/api/attempts', { method: 'POST', body: { paper_id: id, student_name: studentAccount ? studentAccount.name : '' } }); nav('exam/' + d.id);
@@ -322,14 +353,14 @@
   }
   async function renderHistory(serial) {
     await overview();
-    const d = await api('/api/attempts'); if (serial !== state.routeSerial) return;
-    state.history = d.attempts || [];
-    main.innerHTML = '<div class="page-head"><div><div class="eyebrow">YOUR PROGRESS</div><h1>每一步，都有记录。</h1><p>重新打开答卷，回顾解题过程，也看看那些需要再练一次的题。</p></div><a class="btn btn-primary" href="#home">开始新的练习 →</a></div><div class="filter-row"><select id="history-subject" aria-label="按科目筛选"><option value="">全部科目</option>' + (state.overview.subjects || []).map(function (s) { return '<option value="' + esc(s.code) + '">' + esc(s.name) + '</option>'; }).join('') + '</select><select id="history-status" aria-label="按状态筛选"><option value="">全部状态</option><option value="active">进行中</option><option value="pending">待阅卷 / 待公布</option><option value="done">已完成</option></select><span class="small muted">成绩由教师完成阅卷后公布。</span></div><div class="card table-wrap" id="history-table"></div>';
-    renderHistoryTable();
+    if (serial !== state.routeSerial) return;
+    state.history = [];
+    main.innerHTML = '<div class="page-head"><div><div class="eyebrow">YOUR PROGRESS</div><h1>每一步，都有记录。</h1><p>重新打开答卷，回顾解题过程，也看看那些需要再练一次的题。</p></div><a class="btn btn-primary" href="#home">开始新的练习 →</a></div><div class="filter-row"><select id="history-subject" aria-label="按科目筛选"><option value="">全部科目</option>' + (state.overview.subjects || []).map(function (s) { return '<option value="' + esc(s.code) + '">' + esc(s.name) + '</option>'; }).join('') + '</select><select id="history-status" aria-label="按状态筛选"><option value="">全部状态</option><option value="active">进行中</option><option value="pending">待公布</option><option value="done">已公布</option></select><span class="small muted">成绩由教师完成阅卷后公布。</span></div><div class="card table-wrap" id="history-table"></div>';
+    state.historyReload = pagedList($('#history-table'),'attempts',function(items){state.history=items;renderHistoryTable();},()=>({subject:$('#history-subject').value,status:$('#history-status').value}));
   }
   function renderHistoryTable() {
     const subject = $('#history-subject').value; const status = $('#history-status').value;
-    const list = (state.history || []).filter(function (a) { return (!subject || a.subject_code === subject) && (!status || status === 'active' && active(a) || status === 'pending' && !active(a) && (ADMIN ? a.pending_manual : !a.released) || status === 'done' && !active(a) && (ADMIN ? !a.pending_manual : a.released)); });
+    const list = state.history || [];
     $('#history-table').innerHTML = list.length ? '<table class="data-table"><thead><tr><th>试卷 / 科目</th><th>开始时间</th><th>状态</th><th>成绩</th><th>操作</th></tr></thead><tbody>' + list.map(function (a) {
       return '<tr><td class="title-cell">' + esc(a.paper_title || '模拟练习') + '<small>' + esc(a.subject_name || subjectName(a.subject_code)) + ' · ' + esc(a.student_name || '同学') + '</small></td><td>' + esc(dateLabel(a.started_at)) + '</td><td>' + badge(a) + '</td><td>' + (active(a) ? '<span class="muted">—</span>' : !ADMIN && !a.released ? '<span class="muted">待公布</span>' : '<span class="table-score">' + esc(number(a.total_score)) + '<small>/ ' + esc(a.max_score) + (a.pending_manual ? '（暂计）' : '') + '</small></span>') + '</td><td><div class="actions">' + (active(a) ? '<a class="btn btn-small" href="#exam/' + esc(a.id) + '">继续考试</a>' : '<a class="btn btn-small" href="#review/' + esc(a.id) + '">答卷复盘</a><a class="btn btn-ghost btn-small" href="#review/' + esc(a.id) + '/wrong">看错题</a>') + '</div></td></tr>';
     }).join('') + '</tbody></table>' : '<div class="empty"><h3>这里还没有符合条件的练习</h3>完成一份试卷后，就能在这里回看答卷。</div>';
@@ -448,7 +479,7 @@
     main.innerHTML = '<div class="page-head"><div><div class="eyebrow">TEACHER DESK</div><h1>给练习，添一点针对性。</h1><p>维护题目、调整知识范围，或用 AI 生成一套新题。生成的新卷先保存为草稿，审核后再给学生作答。</p></div><button class="btn btn-primary" data-action="new-paper">＋ 新建试卷</button></div><div class="admin-grid"><section class="card ai-card"><h2>✧ AI 一键出题</h2><p>以已有试卷为结构模板，保持科目、考试时间、题型和分值分布；按你填写的范围生成原创题目。</p>' + aiStatusHtml() +
       '<form id="generator-form" class="generator-form"><label><span class="form-label">结构模板</span><select name="template_id" id="generation-template" required>' + templates.map(function (p) { return '<option value="' + esc(p.id) + '">' + esc(p.title) + (p.status === 'draft' ? '（草稿）' : '') + '</option>'; }).join('') + '</select></label><label><span class="form-label">知识范围</span><textarea name="scope" id="generation-scope" required placeholder="例如：二次函数、圆的基本性质，侧重应用题…">' + esc(templates[0] ? templates[0].scope : '') + '</textarea></label><div class="two-columns"><label><span class="form-label">新卷标题</span><input name="title" placeholder="留空沿用模板标题" maxlength="120"></label><label><span class="form-label">难度</span><select name="difficulty"><option value="标准">标准 · 按中考梯度</option><option value="基础">基础 · 巩固知识</option><option value="提高">提高 · 综合应用</option></select></label></div><button class="btn btn-primary" type="submit"' + (!state.ai.configured || !templates.length ? ' disabled' : '') + '>生成新试卷草稿 →</button>' + (!state.ai.configured ? '<span class="form-help">请在服务器配置文件中填写 API key 后刷新页面。密钥只保存在服务器端。</span>' : '<span class="form-help">新题需检查题意、答案与评分标准，审核后再发布。</span>') + '</form></section>' +
       '<section class="card card-pad"><h2>从草稿，到一份好试卷</h2><div class="method-step"><b>1</b><div><h3>维护结构</h3><p>选择科目和分值结构，手动编辑题目、参考答案与评分标准。</p></div></div><div class="method-step"><b>2</b><div><h3>认真审核</h3><p>检查题意是否明确，知识范围是否合适，计算结果与参考答案是否正确。</p></div></div><div class="method-step"><b>3</b><div><h3>发布与阅卷</h3><p>发布后可开始考试；交卷后支持客观题自动判分、AI 阅卷与人工修订。</p></div></div><div class="notice small" style="margin-top:19px;margin-bottom:0">考试会保存试卷快照。之后修改题库，不会改变已经开始的考试和历史答卷。</div></section></div><div id="admin-job-host"></div>' +
-      '<div class="section-heading"><h2>试卷与题库</h2><span>共 ' + papers.length + ' 份试卷</span></div><div class="filter-row"><select id="admin-subject" aria-label="按科目筛选"><option value="">全部科目</option>' + (state.overview.subjects || []).map(function (s) { return '<option value="' + esc(s.code) + '">' + esc(s.name) + '</option>'; }).join('') + '</select><select id="admin-status" aria-label="按发布状态筛选"><option value="">全部状态</option><option value="published">已发布</option><option value="draft">草稿</option></select></div><div class="card table-wrap" id="admin-paper-table"></div>' + sourceNotice();
+      '<div class="section-heading"><h2>试卷与题库</h2></div><div class="filter-row"><select id="admin-subject" aria-label="按科目筛选"><option value="">全部科目</option>' + (state.overview.subjects || []).map(function (s) { return '<option value="' + esc(s.code) + '">' + esc(s.name) + '</option>'; }).join('') + '</select><select id="admin-status" aria-label="按发布状态筛选"><option value="">全部状态</option><option value="published">已发布</option><option value="draft">草稿</option></select></div><div class="card table-wrap" id="admin-paper-table"></div>' + sourceNotice();
     main.insertAdjacentHTML('afterbegin', '<section class="card grading-settings"><header class="grading-settings-heading"><h2>交卷后自动处理</h2><p>设置阅卷与成绩公布方式</p></header><form id="grading-settings-form"><label class="grading-setting-row"><span class="grading-setting-copy"><strong>自动 AI 阅卷</strong><small>学生交卷后，自动评阅尚未评分的主观题。</small></span><input class="grading-toggle" type="checkbox" role="switch" name="auto_grade" aria-label="交卷后自动 AI 阅卷"' + (results[2].auto_grade ? ' checked' : '') + '></label><label class="grading-setting-row"><span class="grading-setting-copy"><strong>自动公布成绩</strong><small>全部题目评分完成后，向学生开放成绩、答案和解析。</small></span><input class="grading-toggle" type="checkbox" role="switch" name="auto_release" aria-label="全部评分完成后自动公布成绩"' + (results[2].auto_release ? ' checked' : '') + '></label><div class="grading-settings-footer"><p>设置对之后交卷的试卷生效，已排队任务保留原设置。<br>AI 阅卷失败时不会公布不完整成绩，教师可复核或撤回成绩。</p><span class="grading-save-status" role="status" aria-live="polite">修改后自动保存</span></div></form></section>');
     const settingsForm = $('#grading-settings-form');
     let savedSettings = { auto_grade: !!results[2].auto_grade, auto_release: !!results[2].auto_release };
@@ -473,11 +504,13 @@
         savingSettings = false; inputs.forEach(input => { input.disabled = false; }); settingsForm.removeAttribute('aria-busy');
       }
     };
-    renderAdminTable(); renderJobHosts();
+    state.paperReload=pagedList($('#admin-paper-table'),'papers',function(items,meta){state.adminPapers=items;renderAdminTable();},()=>({subject:$('#admin-subject').value,status:$('#admin-status').value}));
+    pagedPicker($('#generation-template'),'papers',p=>p.title,function(items){state.templatePapers=items; const button=$('#generator-form button[type=submit]');button.disabled=!state.ai.configured||!items.length;});
+    renderJobHosts();
   }
   function renderAdminTable() {
     const s = $('#admin-subject').value; const status = $('#admin-status').value;
-    const papers = (state.adminPapers || []).filter(function (p) { return (!s || p.subject_code === s) && (!status || p.status === status); });
+    const papers = state.adminPapers || [];
     $('#admin-paper-table').innerHTML = papers.length ? '<table class="data-table"><thead><tr><th>试卷</th><th>科目 / 时间</th><th>题目 / 分值</th><th>状态</th><th>操作</th></tr></thead><tbody>' + papers.map(function (p) {
       return '<tr><td class="title-cell">' + esc(p.title) + '<small>' + esc(p.scope) + '</small></td><td>' + esc(subjectName(p.subject_code)) + '<br><small class="muted">' + esc(p.minutes) + ' 分钟</small></td><td>' + esc(p.question_count || 0) + ' 道 · ' + esc(p.max_score) + ' 分</td><td><span class="pill ' + (p.status === 'published' ? 'pill-green' : 'pill-amber') + '">' + (p.status === 'published' ? '已发布' : '草稿') + '</span></td><td><div class="actions"><a class="btn btn-small" href="#editor/' + esc(p.id) + '">编辑 / 审核</a>' + (p.status === 'published' ? '<a class="btn btn-ghost btn-small" href="#paper/' + esc(p.id) + '">预览</a>' : '<button class="btn btn-ghost btn-small" data-action="publish" data-id="' + esc(p.id) + '">发布</button>') + '<button class="btn btn-ghost btn-danger btn-small" data-action="delete-paper" data-id="' + esc(p.id) + '">归档</button></div></td></tr>';
     }).join('') + '</tbody></table>' : '<div class="empty"><h3>没有符合条件的试卷</h3>新建一份试卷，或调整筛选条件。</div>';
@@ -683,10 +716,10 @@
   });
   document.addEventListener('change', function (event) {
     if (event.target.matches('[data-answer]') && (event.target.type === 'radio' || event.target.type === 'checkbox')) changedAnswer(event.target);
-    if (event.target.id === 'history-subject' || event.target.id === 'history-status') renderHistoryTable();
-    if (event.target.id === 'admin-subject' || event.target.id === 'admin-status') renderAdminTable();
+    if (event.target.id === 'history-subject' || event.target.id === 'history-status') state.historyReload();
+    if (event.target.id === 'admin-subject' || event.target.id === 'admin-status') state.paperReload();
     if (event.target.id === 'generation-template') {
-      const p = (state.adminPapers || []).find(function (x) { return x.id === event.target.value; }); if (p) $('#generation-scope').value = p.scope || '';
+      const p = (state.templatePapers || state.adminPapers || []).find(function (x) { return x.id === event.target.value; }); if (p) $('#generation-scope').value = p.scope || '';
     }
     if (event.target.id === 'editor-subject') syncSubjectDefaults();
     else if (event.target.closest('#paper-editor')) updateEditorLocal();
@@ -704,9 +737,9 @@
   $('#today').textContent = new Date().toLocaleDateString('zh-CN', { month: 'long', day: 'numeric' });
   Object.keys(localStorage).filter(function(k){return /^yixue-exam-(editor-|grades-|jobs$)/.test(k);}).forEach(function(k){localStorage.removeItem(k);});
   (ADMIN && localGet('jobs') || []).forEach(function (j) { watchJob(j.id, j.localType, j.target); });
-  window.ExamUI = { api: api, state: state, main: main, esc: esc, nav: nav, toast: toast, modal: modal };
+  window.ExamUI = { api: api, state: state, main: main, esc: esc, nav: nav, toast: toast, modal: modal, pagedList: pagedList, pagedPicker: pagedPicker };
   window.ExamAccountUI = { api, esc, main, modal, toast, state, route,
     setStudent: function(s) { studentAccount=s; state.overview=null; state.exam=null; state.history=null; state.review=null; clearInterval(state.examTimer); clearTimeout(saveTimer); storagePrefix=s?'yixue-exam-student-'+s.id+'-':'yixue-exam-'; },
-    admin: ADMIN };
+    admin: ADMIN, pagedList: pagedList, pagedPicker: pagedPicker };
   route();
 })();

@@ -140,3 +140,11 @@ body.client-exam .question-area { width:100%; min-width:0; }
 
 .grading-save-status { flex-shrink:0; font-size:13px; color:var(--teal); }
 .grading-save-status.failed { color:var(--rose); }
+
+.list-controls { display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin:14px 0; width:100%; }
+.list-controls input { flex:1 1 180px; width:auto; min-width:0; }
+.list-controls select { width:auto; max-width:140px; }
+.list-controls [role=status] { font-size:12px; color:var(--muted); }
+.list-controls[aria-busy=true] { opacity:.65; }
+@media screen and (max-width:600px) { .list-controls [role=status] { flex-basis:100%; } .list-controls .btn { min-height:44px; } }
+@media print { .list-controls { display:none!important; } }

@@ -4,6 +4,7 @@ require_once __DIR__.'/core.php';
 require_once __DIR__.'/ai.php';
 require_once __DIR__.'/scans.php';
 require_once __DIR__.'/students.php';
+require_once __DIR__.'/lists.php';
 
 function is_admin(): bool {
     $token=$_SERVER['HTTP_AUTHORIZATION'] ?? '';
@@ -71,6 +72,7 @@ function api(string $method,string $path,array $query,array $data): array {
     if (str_starts_with($path,'/api/admin/scans')) return scans_api($method,$path,$data);
     if (str_starts_with($path,'/api/admin/students')) return students_admin($method,$path,$data);
     $owner=$admin?'':owner_hash();
+    if ($method==='GET' && preg_match('~^/api/lists/([a-z]+)$~D',$path,$m)) return list_api($m[1],$query,$admin,$owner);
     if ($path==='/api/ai/status' && $method==='GET') return ai_status();
     if ($path==='/api/jobs' && $method==='GET') {
         $jobs=sql("SELECT * FROM jobs WHERE status IN ('queued','running') ORDER BY created_at DESC LIMIT 20")->fetchAll();
@@ -83,18 +85,21 @@ function api(string $method,string $path,array $query,array $data): array {
     }
     if ($method==='GET' && in_array($path,['/api/overview','/api/subjects','/api/papers','/api/attempts'])) {
         transaction(fn()=>expire_attempts());
-        $papers=list_papers(($query['all'] ?? '')==='1',$query['subject'] ?? null);
-        if ($path==='/api/papers') return ['papers'=>$papers];
-        $rows=sql('SELECT * FROM attempts'.($admin?'':' WHERE owner_hash=?').' ORDER BY started_at DESC LIMIT 500',$admin?[]:[$owner])->fetchAll();
+        $paperPage=list_api('papers',$query+['page_size'=>20],$admin && ($query['all'] ?? '')==='1',$owner);
+        $papers=$paperPage['items'];
+        if ($path==='/api/papers') return ['papers'=>$papers,'pagination'=>$paperPage['pagination']];
+        if ($path==='/api/attempts') { $out=list_api('attempts',$query,$admin,$owner); return ['attempts'=>$out['items'],'pagination'=>$out['pagination']]; }
+        $rows=sql('SELECT * FROM attempts'.($admin?'':' WHERE owner_hash=?').' ORDER BY started_at DESC,id DESC LIMIT 4',$admin?[]:[$owner])->fetchAll();
         $attempts=array_map(fn($r)=>attempt_result($r,$admin)['attempt'],$rows);
-        if ($path==='/api/attempts') return ['attempts'=>$attempts];
+        $counts=sql("SELECT COUNT(*) AS attempts, SUM(CASE WHEN status!='active' THEN 1 ELSE 0 END) AS completed FROM attempts".($admin?'':' WHERE owner_hash=?'),$admin?[]:[$owner])->fetch();
+        $questionCount=(int)sql("SELECT COUNT(*) FROM questions q JOIN papers p ON p.id=q.paper_id WHERE p.status='published'")->fetchColumn();
         $subjects=subjects();
         $seedIds=array_map(fn($s)=>'seed-'.$s['code'],$subjects);
         $seedRows=sql('SELECT id,metadata_json FROM papers WHERE id IN ('.implode(',',array_fill(0,count($seedIds),'?')).')',$seedIds)->fetchAll();
         $seeds=[]; foreach ($seedRows as $row) $seeds[$row['id']]=decode($row['metadata_json']);
         foreach ($subjects as $i=>&$s) { $seed=$seeds['seed-'.$s['code']] ?? []; $s['sort_order']=$i; foreach (['scope','description','blueprint'] as $k) $s[$k]=$seed[$k] ?? null; }
         unset($s);
-        return ['subjects'=>$subjects,'papers'=>$papers,'attempts'=>$attempts,'stats'=>['papers'=>count($papers),'attempts'=>count($attempts),'completed'=>count(array_filter($attempts,fn($a)=>$a['status']!=='active')),'question_count'=>array_sum(array_column($papers,'question_count'))],'ai'=>$admin?ai_status():['configured'=>false]];
+        return ['subjects'=>$subjects,'papers'=>$papers,'attempts'=>$attempts,'stats'=>['papers'=>$paperPage['pagination']['total'],'attempts'=>(int)$counts['attempts'],'completed'=>(int)$counts['completed'],'question_count'=>$questionCount],'ai'=>$admin?ai_status():['configured'=>false]];
     }
     if ($method==='POST' && $path==='/api/admin/papers') { $id=uid(); transaction(fn()=>save_paper($id,$data)); return ['id'=>$id]; }
     if (preg_match('~^/api/(admin/)?papers/([\w-]+)(/publish)?$~',$path,$m)) {

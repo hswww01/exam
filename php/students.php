@@ -86,9 +86,8 @@ function student_auth(string $method,string $path,array $data): array {
 }
 function students_admin(string $method,string $path,array $data): array {
     if ($path==='/api/admin/students' && $method==='GET') {
-        $rows=sql('SELECT id,username,name,class_name,enabled,created_at FROM students ORDER BY created_at DESC')->fetchAll();
-        $legacy=sql("SELECT a.id,a.student_name,a.started_at,a.status FROM attempts a LEFT JOIN students s ON s.owner_key=a.owner_hash WHERE s.id IS NULL ORDER BY a.started_at DESC LIMIT 500")->fetchAll();
-        return ['students'=>$rows,'unassigned'=>$legacy];
+        $students=list_api('students',$_GET,true,''); $legacy=list_api('unassigned',$_GET,true,'');
+        return ['students'=>$students['items'],'pagination'=>$students['pagination'],'unassigned'=>$legacy['items'],'unassigned_pagination'=>$legacy['pagination']];
     }
     if ($path==='/api/admin/students' && $method==='POST') {
         return ['id'=>create_student($data)];
