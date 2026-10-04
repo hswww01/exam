@@ -148,3 +148,24 @@ body.client-exam .question-area { width:100%; min-width:0; }
 .list-controls[aria-busy=true] { opacity:.65; }
 @media screen and (max-width:600px) { .list-controls [role=status] { flex-basis:100%; } .list-controls .btn { min-height:44px; } }
 @media print { .list-controls { display:none!important; } }
+
+/* On phones, list records become cards instead of squeezed desktop tables. */
+@media screen and (max-width:720px) {
+  .table-wrap.mobile-record-host { overflow:visible; border:0; background:transparent; box-shadow:none; border-radius:0; }
+  .mobile-record-host .mobile-record-list { display:block; width:100%; min-width:0; white-space:normal; }
+  .mobile-record-list thead { display:none; }
+  .mobile-record-list tbody { display:grid; grid-template-columns:minmax(0,1fr); gap:14px; width:100%; }
+  .mobile-record-list tbody tr { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:14px 16px; width:100%; min-width:0; padding:18px 16px; border:1px solid var(--line); border-radius:14px; background:var(--paper); box-shadow:var(--shadow); }
+  .mobile-record-list tbody td { display:block; min-width:0!important; width:auto; padding:0; border:0; white-space:normal; overflow-wrap:anywhere; font-size:14px; line-height:1.7; }
+  .mobile-record-list tbody td::before { content:attr(data-label); display:block; margin-bottom:4px; color:var(--muted); font-size:12px; font-weight:400; }
+  .mobile-record-list tbody td.record-title { grid-column:1/-1; font-size:16px; font-weight:600; }
+  .mobile-record-list tbody td.record-title::before { display:none; }
+  .mobile-record-list .title-cell small { display:block; margin-top:6px; font-size:13px; font-weight:400; line-height:1.7; }
+  .mobile-record-list tbody td.record-actions { grid-column:1/-1; display:flex; align-items:center; flex-wrap:wrap; gap:8px; padding-top:14px; border-top:1px solid var(--line); }
+  .mobile-record-list tbody td.record-actions::before { display:none; }
+  .mobile-record-list .record-actions .actions { display:flex; flex-wrap:wrap; gap:8px; width:100%; min-width:0; }
+  .mobile-record-list .record-actions .btn { display:inline-flex; flex:0 0 auto; width:auto; min-width:72px; max-width:100%; min-height:44px; padding:9px 12px; font-size:14px; white-space:nowrap; word-break:normal; overflow-wrap:normal; }
+  .mobile-record-list .pill { font-size:12px; }
+  .list-controls { min-width:0; }
+  .list-controls input { max-width:100%; }
+}

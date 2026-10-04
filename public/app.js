@@ -67,7 +67,20 @@
       try {
         const d=await api('/api/lists/'+kind+'?'+params);
         if(ticket!==sequence || !host.isConnected)return;
-        page=d.pagination.page; render(d.items,d.pagination); const meta=d.pagination;
+        page=d.pagination.page; render(d.items,d.pagination);
+        host.querySelectorAll('.data-table').forEach(function(table) {
+          const headings=Array.from(table.querySelectorAll('thead th')).map(th=>th.textContent.trim());
+          table.classList.add('mobile-record-list');
+          table.querySelectorAll('tbody tr').forEach(function(row) {
+            Array.from(row.children).forEach(function(cell,index) {
+              cell.dataset.label=headings[index] || '';
+              if(index===0)cell.classList.add('record-title');
+              if(headings[index]==='操作')cell.classList.add('record-actions');
+            });
+          });
+          host.classList.add('mobile-record-host'); host.scrollLeft=0;
+        });
+        const meta=d.pagination;
         bar.querySelector('[role=status]').textContent='共 '+meta.total+' 条 · 第 '+meta.page+' / '+meta.pages+' 页';
         bar.querySelector('.list-prev').disabled=page<=1;bar.querySelector('.list-next').disabled=page>=meta.pages;
       }catch(err){if(ticket===sequence && host.isConnected){bar.querySelector('[role=status]').textContent='加载失败，请重试';toast(err.message,true);}}
