@@ -128,9 +128,17 @@ function get_paper(string $id): array {
     $p['question_count']=count($qs); return [$p,$qs];
 }
 function list_papers(bool $all=false,?string $subject=null): array {
-    $out=[]; foreach (sql("SELECT id FROM papers WHERE status!='archived'".($all?'':" AND status='published'").' ORDER BY created_at DESC,id')->fetchAll() as $r) {
-        [$p]=get_paper($r['id']); if (!$subject || $p['subject_code']===$subject) $out[]=$p;
-    } return $out;
+    $query="SELECT p.*, (SELECT COUNT(*) FROM questions q WHERE q.paper_id=p.id) AS question_count FROM papers p WHERE p.status!='archived'";
+    if (!$all) $query.=" AND p.status='published'";
+    $args=[];
+    if ($subject) { $query.=' AND p.subject_code=?'; $args[]=$subject; }
+    $out=[];
+    foreach (sql($query.' ORDER BY p.created_at DESC,p.id',$args)->fetchAll() as $row) {
+        $p=decode($row['metadata_json']);
+        foreach (['id','status','created_at','updated_at'] as $k) $p[$k]=$row[$k];
+        $p['question_count']=(int)$row['question_count']; $out[]=$p;
+    }
+    return $out;
 }
 function public_question(array $q,bool $reveal=false): array { if (!$reveal) foreach (['answer','rubric','explanation','tolerance'] as $k) unset($q[$k]); return $q; }
 function get_attempt(string $id): array {

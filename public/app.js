@@ -83,7 +83,7 @@
     try {
       if (ADMIN) { const auth = await api('/api/auth/status'); if (!auth.authenticated) { await renderLogin(auth); return; } }
       if (!ADMIN && ['admin','editor','scans','scan'].includes(page)) { nav('home'); return; }
-      await overview();
+      await overview(page === 'home');
       if (serial !== state.routeSerial) return;
       if (page === 'home') await renderHome(serial);
       else if (page === 'subject') await renderSubject(pieces[1], serial);
@@ -110,7 +110,7 @@
     $('#admin-login').onsubmit = async function(event) { event.preventDefault(); event.stopPropagation(); const f = new FormData(event.target); if (!a.configured && f.get('password') !== f.get('confirm')) { toast('两次密码不一致。',true); return; } try { const d = await api('/api/auth/' + (a.configured ? 'login' : 'setup'), {method:'POST',body:{password:f.get('password'),setup_code:f.get('setup_code')}}); adminToken = d.token; state.overview = null; const tasks = await api('/api/jobs'); (tasks.jobs || []).forEach(function(j){watchJob(j.id,j.type,j.target_id);}); await route(); } catch(err) { toast(err.message,true); } };
   }
   async function renderHome(serial) {
-    const d = await overview(true);
+    const d = await overview();
     if (serial !== state.routeSerial) return;
     const recent = (d.attempts || []).slice(0, 4); const ongoing = recent.find(active);
     const subjects = d.subjects || []; const stats = d.stats || {};

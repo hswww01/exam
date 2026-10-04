@@ -78,7 +78,12 @@ function api(string $method,string $path,array $query,array $data): array {
         $rows=sql('SELECT * FROM attempts'.($admin?'':' WHERE owner_hash=?').' ORDER BY started_at DESC LIMIT 500',$admin?[]:[$owner])->fetchAll();
         $attempts=array_map(fn($r)=>attempt_result($r,$admin)['attempt'],$rows);
         if ($path==='/api/attempts') return ['attempts'=>$attempts];
-        $subjects=subjects(); foreach ($subjects as $i=>&$s) { [$seed]=get_paper('seed-'.$s['code']); $s['sort_order']=$i; foreach (['scope','description','blueprint'] as $k) $s[$k]=$seed[$k]; }
+        $subjects=subjects();
+        $seedIds=array_map(fn($s)=>'seed-'.$s['code'],$subjects);
+        $seedRows=sql('SELECT id,metadata_json FROM papers WHERE id IN ('.implode(',',array_fill(0,count($seedIds),'?')).')',$seedIds)->fetchAll();
+        $seeds=[]; foreach ($seedRows as $row) $seeds[$row['id']]=decode($row['metadata_json']);
+        foreach ($subjects as $i=>&$s) { $seed=$seeds['seed-'.$s['code']] ?? []; $s['sort_order']=$i; foreach (['scope','description','blueprint'] as $k) $s[$k]=$seed[$k] ?? null; }
+        unset($s);
         return ['subjects'=>$subjects,'papers'=>$papers,'attempts'=>$attempts,'stats'=>['papers'=>count($papers),'attempts'=>count($attempts),'completed'=>count(array_filter($attempts,fn($a)=>$a['status']!=='active')),'question_count'=>array_sum(array_column($papers,'question_count'))],'ai'=>$admin?ai_status():['configured'=>false]];
     }
     if ($method==='POST' && $path==='/api/admin/papers') { $id=uid(); transaction(fn()=>save_paper($id,$data)); return ['id'=>$id]; }
