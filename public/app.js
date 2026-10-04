@@ -147,12 +147,26 @@
   }
   function printHeader(p, name) { return '<div class="print-header"><h1>' + esc(p.title) + '</h1><p>' + esc(subjectName(p.subject_code)) + ' · 考试时间 ' + esc(p.minutes) + ' 分钟 · 满分 ' + esc(p.max_score) + ' 分</p><p>' + (name ? '考生：' + esc(name) : '姓名：________________  日期：________________') + '</p></div>'; }
   function sectionBlocks(qs, renderer) {
-    let last = null;
-    return qs.map(function (q, i) {
-      const section = q.section || '试题'; let heading = '';
-      if (section !== last) { const sectionQs = qs.filter(function (x) { return (x.section || '试题') === section; }); heading = '<div class="section-banner"><h2>' + esc(section) + '</h2><small>共 ' + esc(questionPoints(sectionQs)) + ' 分</small></div>'; last = section; }
-      return heading + renderer(q, i);
-    }).join('');
+    let last = null, html = '';
+    const passageKey = q => String(q.passage || '').replace(/\r\n?/g, '\n').trim();
+    for (let i = 0; i < qs.length;) {
+      const q = qs[i], section = q.section || '试题';
+      if (section !== last) {
+        const sectionQs = qs.filter(x => (x.section || '试题') === section);
+        html += '<div class="section-banner"><h2>' + esc(section) + '</h2><small>共 ' + esc(questionPoints(sectionQs)) + ' 分</small></div>';
+        last = section;
+      }
+      const passage = passageKey(q); let end = i + 1;
+      if (passage) while (end < qs.length && (qs[end].section || '试题') === section && passageKey(qs[end]) === passage) end++;
+      if (end > i + 1) {
+        const labels = qs.slice(i, end).map((item, offset) => item.label || i + offset + 1);
+        html += '<section class="passage-group"><div class="card shared-passage"><div class="shared-passage-label">阅读材料 · 对应题号：' + esc(labels.join('、')) + '</div><div class="passage">' + esc(q.passage) + '</div></div>';
+        for (let j = i; j < end; j++) html += renderer(Object.assign({}, qs[j], { passage: '' }), j);
+        html += '</section>';
+      } else html += renderer(q, i);
+      i = end;
+    }
+    return html;
   }
   function figureHtml(q) { return q.figure && /^[A-Za-z0-9_.-]+$/.test(q.figure) ? '<img class="question-figure" src="' + BASE + '/figures/' + esc(q.figure) + '" alt="' + esc(q.figure_alt || '题目配图') + '" loading="lazy">' : ''; }
   function questionBody(q) { return (q.passage ? '<div class="passage">' + esc(q.passage) + '</div>' : '') + '<div class="stem">' + esc(q.stem) + '</div>' + figureHtml(q); }

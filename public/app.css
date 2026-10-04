@@ -29,3 +29,15 @@ body.client-exam .question-area { width:100%; min-width:0; }
 
 .account-panel { max-width:480px; margin:48px auto; }
 .account-panel .form-label, #student-edit-form .form-label, #assign-attempt .form-label { display:block; margin:16px 0; }
+
+/* A passage shared by consecutive questions is displayed once above its items. */
+.shared-passage { padding:24px; margin-bottom:14px; }
+.shared-passage-label { font-size:13px; color:#526176; margin-bottom:12px; }
+.shared-passage .passage { margin:0; }
+.passage-group { min-width:0; margin-bottom:24px; }
+@media print {
+  .passage-group, .shared-passage { break-inside:auto!important; page-break-inside:auto!important; }
+  .shared-passage { padding:0; margin:10px 0; border:0; box-shadow:none; }
+  .shared-passage-label { color:#333; break-after:avoid; }
+  .shared-passage .passage { max-height:none; overflow:visible; }
+}
