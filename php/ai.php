@@ -20,10 +20,23 @@ function ai_call(string $kind,array $payload,?array $vision=null): array {
         $body['input']=[['role'=>'user','content'=>[['type'=>'input_text','text'=>j($payload)],['type'=>'input_image','image_url'=>$vision['image'],'detail'=>'high']]]];
     }
     if (preg_match('/^(gpt-[56]|o[34])/',$body['model'])) $body['reasoning']=['effort'=>$c['OPENAI_REASONING_EFFORT'] ?? 'medium'];
-    $ch=curl_init($base.'/responses'); $raw='';
-    curl_setopt_array($ch,[CURLOPT_POST=>true,CURLOPT_POSTFIELDS=>j($body),CURLOPT_HTTPHEADER=>['Content-Type: application/json','Authorization: Bearer '.$c['OPENAI_API_KEY']],CURLOPT_CONNECTTIMEOUT=>15,CURLOPT_TIMEOUT=>max(900,min(1800,(int)($c['OPENAI_TIMEOUT'] ?? 900))),CURLOPT_FOLLOWLOCATION=>false,CURLOPT_SSL_VERIFYPEER=>true,CURLOPT_SSL_VERIFYHOST=>2,CURLOPT_WRITEFUNCTION=>function($ch,$chunk)use(&$raw){ if (strlen($raw)+strlen($chunk)>8000000) return 0; $raw.=$chunk; return strlen($chunk); }]);
-    $ok=curl_exec($ch); $code=curl_getinfo($ch,CURLINFO_RESPONSE_CODE); curl_close($ch);
-    if ($ok===false) throw new ApiError('AI 请求超时、连接失败或响应过大，请检查网络后重试。',503);
+    $ch=curl_init($base.'/responses'); $raw=''; $tooLarge=false;
+    curl_setopt_array($ch,[CURLOPT_POST=>true,CURLOPT_POSTFIELDS=>j($body),CURLOPT_HTTPHEADER=>['Content-Type: application/json','Authorization: Bearer '.$c['OPENAI_API_KEY']],CURLOPT_CONNECTTIMEOUT=>15,CURLOPT_TIMEOUT=>max(900,min(1800,(int)($c['OPENAI_TIMEOUT'] ?? 900))),CURLOPT_FOLLOWLOCATION=>false,CURLOPT_SSL_VERIFYPEER=>true,CURLOPT_SSL_VERIFYHOST=>2,CURLOPT_WRITEFUNCTION=>function($ch,$chunk)use(&$raw,&$tooLarge){ if (strlen($raw)+strlen($chunk)>8000000) { $tooLarge=true; return 0; } $raw.=$chunk; return strlen($chunk); }]);
+    if (!empty($c['OPENAI_PROXY'])) curl_setopt($ch,CURLOPT_PROXY,$c['OPENAI_PROXY']);
+    $ok=curl_exec($ch); $code=curl_getinfo($ch,CURLINFO_RESPONSE_CODE);
+    $errno=curl_errno($ch); $elapsed=curl_getinfo($ch,CURLINFO_TOTAL_TIME); $connected=curl_getinfo($ch,CURLINFO_CONNECT_TIME); $tls=curl_getinfo($ch,CURLINFO_APPCONNECT_TIME);
+    curl_close($ch);
+    if ($ok===false) {
+        error_log('Exam AI transport '.j(['errno'=>$errno,'http'=>$code,'seconds'=>round($elapsed,2),'connect_seconds'=>$connected,'tls_seconds'=>$tls,'bytes'=>strlen($raw),'size_limit'=>$tooLarge]));
+        $message=$tooLarge?'AI 响应超过8MB限制，已停止接收。':match($errno) {
+            5,6=>'AI 服务或代理域名解析失败，请检查服务器 DNS。',
+            7=>'服务器无法连接 AI 服务或代理，请检查网络出口。',
+            28=>$connected<=0?'连接 AI 服务超时（尚未建立连接），请检查服务器网络出口或代理。':'AI 请求等待超时，请稍后手动重试。',
+            35,60=>'AI 连接的 TLS 握手或证书校验失败，请检查服务器证书与代理配置。',
+            default=>'AI 网络传输失败（错误码 '.$errno.'），请检查后台日志。'
+        };
+        throw new ApiError($message,503);
+    }
     if ($code>=400) throw new ApiError([401=>'API key 无效或失效。',403=>'当前 key 没有模型权限。',404=>'模型或 API 地址不存在。',429=>'Flex 资源暂不可用、额度不足或请求过于频繁；请稍后手动重试。'][$code] ?? "AI 服务返回 HTTP {$code}，请稍后重试。",503);
     try { $r=decode($raw); } catch(Throwable) { throw new ApiError('AI 响应无法解析。',503); }
     if (isset($r['status']) && $r['status']!=='completed') throw new ApiError('AI 响应未完成，未保存不完整结果。',503);

@@ -23,7 +23,7 @@ function config(): array {
             [$key,$value]=explode('=',$line,2); $v[trim($key)]=trim(trim($value),"\"'");
         }
     }
-    foreach (['OPENAI_API_KEY','OPENAI_BASE_URL','OPENAI_MODEL','OPENAI_REASONING_EFFORT','OPENAI_TIMEOUT','EXAM_DB_PATH','EXAM_SETUP_CODE','EXAM_SITE_URL','EXAM_BASE_PATH','MYSQL_HOST','MYSQL_USER','MYSQL_PASS','MYSQL_PORT','MYSQL_DATABASE'] as $key) {
+    foreach (['OPENAI_API_KEY','OPENAI_PROXY','OPENAI_BASE_URL','OPENAI_MODEL','OPENAI_REASONING_EFFORT','OPENAI_TIMEOUT','EXAM_DB_PATH','EXAM_SETUP_CODE','EXAM_SITE_URL','EXAM_BASE_PATH','MYSQL_HOST','MYSQL_USER','MYSQL_PASS','MYSQL_PORT','MYSQL_DATABASE'] as $key) {
         if (getenv($key)!==false) $v[$key]=getenv($key);
     }
     return $v;
