@@ -21,7 +21,7 @@
       },()=>({status:scanFilter.value}));
       scanFilter.onchange=reloadScans;
       document.querySelector('#scan-create').onsubmit = async e => {
-        e.preventDefault(); e.stopPropagation(); const b=e.target.querySelector('button'); b.disabled=true;
+        e.preventDefault(); e.stopPropagation(); const b=e.target.querySelector('button:not([type=button])'); b.disabled=true;
         try { const f=new FormData(e.target); const r=await u.api('/api/admin/scans',{method:'POST',body:{paper_id:f.get('paper_id'),student_name:f.get('student_name')}}); u.nav('scan/'+r.id); }
         catch(err) { u.toast(err.message,true); } finally { b.disabled=false; }
       };
