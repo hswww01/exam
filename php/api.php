@@ -25,7 +25,7 @@ function auth_api(string $method,string $path,array $data,bool $admin): array {
         sql('DELETE FROM admin_sessions WHERE token_hash=?',[hash('sha256',substr($_SERVER['HTTP_AUTHORIZATION'] ?? '',7))]); return ['ok'=>true];
     }
     if ($method!=='POST' || !in_array($path,['/api/auth/login','/api/auth/setup'])) throw new ApiError('接口不存在。',404);
-    $password=strval_checked($data['password'] ?? null,'家长密码',128,true);
+    $password=strval_checked($data['password'] ?? null,'教师密码',128,true);
     $client=hash('sha256',$_SERVER['REMOTE_ADDR'] ?? 'local');
     sql('DELETE FROM login_failures WHERE created<?',[time()-300]);
     if ((int)sql('SELECT COUNT(*) FROM login_failures WHERE client=?',[$client])->fetchColumn()>=8) throw new ApiError('尝试次数过多，请5分钟后重试。',429);
@@ -57,7 +57,7 @@ function api(string $method,string $path,array $query,array $data): array {
     $admin=is_admin();
     if (str_starts_with($path,'/api/auth/')) return auth_api($method,$path,$data,$admin);
     $privileged=preg_match('~^/api/(admin/|ai/|jobs(?:/|$))|^/api/attempts/[\w-]+/(grade|ai-grade|release)$~',$path) || ($query['all'] ?? '')==='1';
-    if ($privileged && !$admin) throw new ApiError('请先登录家长后台。',401);
+    if ($privileged && !$admin) throw new ApiError('请先登录教师后台。',401);
     if (str_starts_with($path,'/api/admin/scans')) return scans_api($method,$path,$data);
     if (str_starts_with($path,'/api/admin/students')) return students_admin($method,$path,$data);
     $owner=$admin?'':owner_hash();
@@ -123,7 +123,7 @@ function api(string $method,string $path,array $query,array $data): array {
             if ($method==='PUT' && $action==='answers') { if ($r['status']!=='active') throw new ApiError('考试已经交卷或时间已到。',409); update_answers($r,$data); return ['id'=>$id,'saved'=>true]; }
             if ($method==='POST' && $action==='submit') { if ($r['status']==='active') { update_answers($r,$data); submit_attempt(get_attempt($id)); } return ['id'=>$id]; }
             if ($method==='POST' && in_array($action,['grade','ai-grade','release'])) {
-                if (!$admin) throw new ApiError('请登录家长后台。',401);
+                if (!$admin) throw new ApiError('请登录教师后台。',401);
                 if ($r['status']==='active') throw new ApiError('请先交卷。',409);
                 if ($action==='release') {
                     $release=$data['released'] ?? null; if (!is_bool($release)) throw new ApiError('公布状态无效。');

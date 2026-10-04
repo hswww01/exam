@@ -410,20 +410,20 @@ class Handler(BaseHTTPRequestHandler):
             with AUTH_LOCK: SESSIONS.pop(token,None)
             return {"ok":True},200
         if path in ("/api/auth/setup","/api/auth/login") and method == "POST":
-            password = text(data.get("password"),"家长密码",128,True)
+            password = text(data.get("password"),"教师密码",128,True)
             with AUTH_LOCK:
                 LOGIN_FAILURES[:] = [v for v in LOGIN_FAILURES if v > time.time()-300]
                 if len(LOGIN_FAILURES)>=8: raise APIError("尝试次数过多，请5分钟后再试。",429)
                 with db(True) as conn:
                     row = conn.execute("SELECT value FROM settings WHERE key='admin_password'").fetchone()
                     if path.endswith("setup"):
-                        if row: raise APIError("家长密码已经设置，请登录。",409)
-                        if len(password)<10: raise APIError("家长密码至少10个字符。")
+                        if row: raise APIError("教师密码已经设置，请登录。",409)
+                        if len(password)<10: raise APIError("教师密码至少10个字符。")
                         salt = secrets.token_hex(16)
                         digest = hashlib.scrypt(password.encode(),salt=bytes.fromhex(salt),n=16384,r=8,p=1).hex()
                         conn.execute("INSERT INTO settings(key,value) VALUES('admin_password',?)",(salt+":"+digest,))
                     else:
-                        if not row: raise APIError("请先设置家长密码。",409)
+                        if not row: raise APIError("请先设置教师密码。",409)
                         salt,digest = row[0].split(":")
                         actual = hashlib.scrypt(password.encode(),salt=bytes.fromhex(salt),n=16384,r=8,p=1).hex()
                         if not secrets.compare_digest(actual,digest):
@@ -434,7 +434,7 @@ class Handler(BaseHTTPRequestHandler):
                 LOGIN_FAILURES.clear()
             return {"token":token,"expires_in":1800},200
         privileged = path.startswith(("/api/admin/","/api/ai/","/api/jobs/")) or bool(re.fullmatch(r"/api/attempts/[\w-]+/(grade|ai-grade|release)",path)) or query.get("all")==["1"]
-        if privileged and not admin: raise APIError("请先登录家长后台。",401)
+        if privileged and not admin: raise APIError("请先登录教师后台。",401)
         if method=="GET" and path=="/api/ai/status": return ai_client.status(),200
         if method=="GET" and path.startswith("/api/jobs/"):
             with db() as conn:

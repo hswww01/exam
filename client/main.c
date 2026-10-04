@@ -13,12 +13,11 @@
 
 #define ID_HOME 101
 #define ID_RELOAD 102
-#define ID_FULLSCREEN 103
 #define ID_EXIT 104
 #define WM_CLIENT_STATE (WM_APP+1)
 #define WM_WEB_ERROR (WM_APP+2)
 static const WCHAR EXAM_URL[]=L"https://cn.tqdream.com/exam/";
-static HWND window, statusLabel, homeButton, reloadButton, fullscreenButton, exitButton;
+static HWND window, statusLabel, homeButton, reloadButton, exitButton;
 static ICoreWebView2Controller *controller;
 static ICoreWebView2 *web;
 static HFONT font;
@@ -73,15 +72,13 @@ static void status(void) {
     else if(inExam) StringCchPrintfW(text,320,L"考试中 · 离开 %u 次 · 累计 %llu 秒（本次客户端会话）",departures,awayTotal/1000);
     else StringCchCopyW(text,320,L"亦学 · 学生考试客户端 | Ctrl+Shift+Q 退出");
     SetWindowTextW(statusLabel,text);
-    EnableWindow(fullscreenButton,!inExam);
 }
 static void layout(void) {
     RECT r; int height=inExam?0:px(54), gap=px(8), bw=px(96), right;
     GetClientRect(window,&r); right=r.right-gap;
-    {HWND children[]={statusLabel,homeButton,reloadButton,fullscreenButton,exitButton};UINT i;
-     for(i=0;i<5;i++)ShowWindow(children[i],inExam?SW_HIDE:SW_SHOW);}
+    {HWND children[]={statusLabel,homeButton,reloadButton,exitButton};UINT i;
+     for(i=0;i<4;i++)ShowWindow(children[i],inExam?SW_HIDE:SW_SHOW);}
     MoveWindow(exitButton,right-bw,px(10),bw,px(32),TRUE); right-=bw+gap;
-    MoveWindow(fullscreenButton,right-bw,px(10),bw,px(32),TRUE); right-=bw+gap;
     MoveWindow(reloadButton,right-bw,px(10),bw,px(32),TRUE); right-=bw+gap;
     MoveWindow(homeButton,right-bw,px(10),bw,px(32),TRUE); right-=bw+gap;
     MoveWindow(statusLabel,px(16),px(17),max(px(100),right-px(20)),px(28),TRUE);
@@ -177,7 +174,7 @@ static HRESULT STDMETHODCALLTYPE onKey(ICoreWebView2AcceleratorKeyPressedEventHa
     ctrl=(GetKeyState(VK_CONTROL)&0x8000)!=0;shift=(GetKeyState(VK_SHIFT)&0x8000)!=0;alt=(GetKeyState(VK_MENU)&0x8000)!=0;
     if(ctrl&&shift&&key=='Q') {if(!inExam)PostMessageW(window,WM_CLOSE,0,0);handled=TRUE;}
     else if(key==VK_F5 || (ctrl&&key=='R')) {PostMessageW(window,WM_COMMAND,ID_RELOAD,0);handled=TRUE;}
-    else if(key==VK_F11) {if(!inExam)PostMessageW(window,WM_COMMAND,ID_FULLSCREEN,0);handled=TRUE;}
+    else if(key==VK_F11) handled=TRUE;
     else if(key==VK_F12 || (alt&&(key==VK_LEFT||key==VK_RIGHT)) ||
             (ctrl&&(key=='L'||key=='N'||key=='T'||key=='P'||key=='S'||key=='U')) ||
             (ctrl&&shift&&(key=='I'||key=='J'||key=='C'))) handled=TRUE;
@@ -267,9 +264,8 @@ static LRESULT CALLBACK windowProc(HWND h,UINT message,WPARAM w,LPARAM l) {
         statusLabel=CreateWindowW(L"STATIC",L"正在启动…",WS_CHILD|WS_VISIBLE|SS_LEFT,0,0,0,0,h,NULL,NULL,NULL);
         homeButton=CreateWindowW(L"BUTTON",L"返回首页",WS_CHILD|WS_VISIBLE|WS_TABSTOP,0,0,0,0,h,(HMENU)ID_HOME,NULL,NULL);
         reloadButton=CreateWindowW(L"BUTTON",L"重新连接",WS_CHILD|WS_VISIBLE|WS_TABSTOP,0,0,0,0,h,(HMENU)ID_RELOAD,NULL,NULL);
-        fullscreenButton=CreateWindowW(L"BUTTON",L"全屏 / 窗口",WS_CHILD|WS_VISIBLE|WS_TABSTOP,0,0,0,0,h,(HMENU)ID_FULLSCREEN,NULL,NULL);
         exitButton=CreateWindowW(L"BUTTON",L"退出",WS_CHILD|WS_VISIBLE|WS_TABSTOP,0,0,0,0,h,(HMENU)ID_EXIT,NULL,NULL);
-        {HWND children[]={statusLabel,homeButton,reloadButton,fullscreenButton,exitButton};UINT i;for(i=0;i<5;i++)SendMessageW(children[i],WM_SETFONT,(WPARAM)font,TRUE);}
+        {HWND children[]={statusLabel,homeButton,reloadButton,exitButton};UINT i;for(i=0;i<4;i++)SendMessageW(children[i],WM_SETFONT,(WPARAM)font,TRUE);}
         return 0;
     case WM_SIZE: layout();return 0;
     case WM_DPICHANGED: dpi=HIWORD(w); if(fullscreen)setFullscreen(TRUE);else {RECT *r=(RECT*)l;SetWindowPos(h,NULL,r->left,r->top,r->right-r->left,r->bottom-r->top,SWP_NOZORDER);} layout();return 0;
@@ -297,7 +293,6 @@ static LRESULT CALLBACK windowProc(HWND h,UINT message,WPARAM w,LPARAM l) {
         switch(LOWORD(w)){
         case ID_HOME:if(web&&!inExam){ICoreWebView2_Navigate(web,EXAM_URL);}break;
         case ID_RELOAD:if(!inExam){if(web&&!browserFailed)ICoreWebView2_Reload(web);else initBrowser();}break;
-        case ID_FULLSCREEN:if(!inExam)setFullscreen(!fullscreen);break;
         case ID_EXIT:PostMessageW(h,WM_CLOSE,0,0);break;
         }return 0;
     case WM_SYSCOMMAND:

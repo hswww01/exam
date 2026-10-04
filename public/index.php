@@ -45,4 +45,4 @@ try {
     $mime=['css'=>'text/css','js'=>'application/javascript','svg'=>'image/svg+xml','png'=>'image/png','jpg'=>'image/jpeg','jpeg'=>'image/jpeg','webp'=>'image/webp'];
     header('Content-Type: '.$mime[pathinfo($path,PATHINFO_EXTENSION)]); readfile(__DIR__.$path);
 } catch (ApiError $e) { http_response_code($e->status); header('Content-Type: application/json; charset=utf-8'); echo j(['error'=>$e->getMessage()]); }
-catch (Throwable $e) { http_response_code(500); header('Content-Type: application/json; charset=utf-8'); error_log('Exam request failure: '.get_class($e)); echo j(['error'=>'服务暂时不可用，请联系家长检查服务器配置。']); }
+catch (Throwable $e) { http_response_code(500); header('Content-Type: application/json; charset=utf-8'); error_log('Exam request failure: '.get_class($e)); echo j(['error'=>'服务暂时不可用，请联系教师检查服务器配置。']); }

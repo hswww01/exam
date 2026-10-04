@@ -30,7 +30,7 @@ function create_student(array $data): string {
     $hash=student_password($data['password'] ?? ''); $id=uid();
     $class=strval_checked($data['class_name'] ?? '', '班级',50);
     try { sql('INSERT INTO students(id,username,name,class_name,password_hash,owner_key,enabled,created_at) VALUES(?,?,?,?,?,?,1,?)',[$id,$username,$name,$class,$hash,bin2hex(random_bytes(32)),stamp()]); }
-    catch (PDOException $e) { if (str_starts_with((string)$e->getCode(),'23')) throw new ApiError('该学号已注册，请登录；忘记密码请联系家长。',409); throw $e; }
+    catch (PDOException $e) { if (str_starts_with((string)$e->getCode(),'23')) throw new ApiError('该学号已注册，请登录；忘记密码请联系教师。',409); throw $e; }
     return $id;
 }
 function student_auth(string $method,string $path,array $data): array {
